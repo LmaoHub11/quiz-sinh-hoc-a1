@@ -526,6 +526,8 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('💡 Bấm Ctrl + C trong cửa sổ này để tắt server.');
   console.log('====================================================\n');
 
-  // Khởi động Cloudflare Tunnel để tạo link online không cần IP
-  startCloudflareTunnel(PORT);
+  // Khởi động Cloudflare Tunnel khi chạy local trên máy tính (nếu không phải môi trường Cloud như Render)
+  if (!process.env.RENDER && !process.env.RAILWAY_STATIC_URL && !process.env.VERCEL) {
+    startCloudflareTunnel(PORT);
+  }
 });
