@@ -778,6 +778,231 @@
     </div>
   </div>
 
+  <!-- Nút Ẩn Mở Bảng Quản Trị Admin (Nhấp hoặc dùng Ctrl+Shift+A) -->
+  <button class="secret-admin-trigger" id="secretAdminTrigger" title="Hệ thống Quản Trị Admin" aria-label="Admin Portal">
+    <span class="material-symbols-rounded">shield</span>
+  </button>
+
+  <!-- Modal Xác Thực Mật Khẩu Admin (Pass: 211008) -->
+  <div class="modal-overlay hidden" id="adminLoginModal">
+    <div class="modal-content admin-auth-card">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <span class="material-symbols-rounded" style="color:var(--primary); font-size:24px;">lock</span>
+          <h3>Xác Thực Quản Trị Viên</h3>
+        </div>
+        <button class="icon-btn sm" id="closeAdminLoginModalBtn"><span class="material-symbols-rounded">close</span></button>
+      </div>
+      <form id="adminLoginForm">
+        <div class="modal-body compact-modal-body">
+          <p style="font-size:13px; color:var(--text-2); margin:0 0 10px; line-height:1.5;">
+            Khu vực bảo mật dành cho Quản trị viên để theo dõi lưu lượng, cấm IP và điều hành máy chủ.
+          </p>
+          <div class="compact-field">
+            <label for="adminPasswordInput"><span class="material-symbols-rounded">key</span> Mật khẩu quản trị:</label>
+            <input type="password" id="adminPasswordInput" placeholder="Nhập mật khẩu..." autocomplete="current-password" />
+          </div>
+          <div id="adminLoginError" class="admin-error-text hidden" style="color:#ef4444; font-size:12.5px; margin-top:6px;"></div>
+        </div>
+        <div class="modal-footer compact-modal-footer">
+          <button type="button" class="btn outline" id="cancelAdminLoginModalBtn">Hủy</button>
+          <button type="submit" class="btn primary" id="submitAdminLoginBtn">
+            <span class="material-symbols-rounded">login</span> Mở Bảng Điều Khiển
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal Bảng Điều Khiển Quản Trị Admin Đầy Đủ -->
+  <div class="modal-overlay hidden" id="adminDashboardModal">
+    <div class="modal-content admin-dashboard-modal">
+      <div class="modal-header admin-dash-header">
+        <div class="admin-dash-title-wrap">
+          <div class="admin-badge-icon">
+            <span class="material-symbols-rounded">admin_panel_settings</span>
+          </div>
+          <div>
+            <h3>Bảng Quản Trị Máy Chủ (Admin Control Panel)</h3>
+            <span class="admin-status-pill"><span class="live-dot-mini"></span> Máy chủ Realtime • Mã: 211008</span>
+          </div>
+        </div>
+        <div class="admin-header-actions">
+          <button class="btn outline sm" id="refreshAdminDataBtn" title="Làm mới dữ liệu">
+            <span class="material-symbols-rounded">refresh</span> Làm mới
+          </button>
+          <button class="icon-btn sm" id="closeAdminDashboardBtn" title="Đóng bảng quản trị">
+            <span class="material-symbols-rounded">close</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <div class="admin-nav-tabs">
+        <button type="button" class="admin-tab-btn active" data-tab="stats">
+          <span class="material-symbols-rounded">query_stats</span> Lưu lượng & Thống kê
+        </button>
+        <button type="button" class="admin-tab-btn" data-tab="ban">
+          <span class="material-symbols-rounded">block</span> Cấm truy cập (Blacklist)
+        </button>
+        <button type="button" class="admin-tab-btn" data-tab="rooms">
+          <span class="material-symbols-rounded">meeting_room</span> Quản lý Phòng Live
+        </button>
+        <button type="button" class="admin-tab-btn" data-tab="broadcast">
+          <span class="material-symbols-rounded">campaign</span> Thông báo máy chủ
+        </button>
+      </div>
+
+      <div class="admin-dash-body">
+        <!-- TAB 1: THỐNG KÊ LƯU LƯỢNG & PHIÊN TRUY CẬP -->
+        <div class="admin-tab-pane active" id="adminPaneStats">
+          <div class="admin-stat-grid">
+            <div class="admin-stat-card">
+              <div class="stat-icon-wrap" style="color:#34a853; background:rgba(52,168,83,0.12);">
+                <span class="material-symbols-rounded">sensors</span>
+              </div>
+              <div class="stat-info">
+                <span class="stat-label">Đang Online Thời Gian Thực</span>
+                <b class="stat-num" id="statOnlineUsers">0</b>
+              </div>
+            </div>
+
+            <div class="admin-stat-card">
+              <div class="stat-icon-wrap" style="color:#4285f4; background:rgba(66,133,244,0.12);">
+                <span class="material-symbols-rounded">public</span>
+              </div>
+              <div class="stat-info">
+                <span class="stat-label">Lưu lượng Lượt Truy Cập</span>
+                <b class="stat-num" id="statTotalRequests" style="font-size:18px;">0</b>
+              </div>
+            </div>
+
+            <div class="admin-stat-card">
+              <div class="stat-icon-wrap" style="color:#ea4335; background:rgba(234,67,53,0.12);">
+                <span class="material-symbols-rounded">fingerprint</span>
+              </div>
+              <div class="stat-info">
+                <span class="stat-label">IP Độc Nhất (Unique IPs)</span>
+                <b class="stat-num" id="statUniqueIps">0</b>
+              </div>
+            </div>
+
+            <div class="admin-stat-card">
+              <div class="stat-icon-wrap" style="color:#fbbc05; background:rgba(251,188,5,0.12);">
+                <span class="material-symbols-rounded">memory</span>
+              </div>
+              <div class="stat-info">
+                <span class="stat-label">Uptime & RAM Máy Chủ</span>
+                <b class="stat-num" id="statUptime" style="font-size:14px;">—</b>
+              </div>
+            </div>
+          </div>
+
+          <div class="admin-section-box">
+            <div class="admin-section-head">
+              <h4><span class="material-symbols-rounded">history</span> 50 Phiên truy cập mới nhất</h4>
+              <span style="font-size:12px; color:var(--text-2);">Ghi nhận IP thực & Thiết bị</span>
+            </div>
+            <div class="admin-table-container">
+              <table class="admin-table">
+                <thead>
+                  <tr>
+                    <th>Thời gian</th>
+                    <th>Địa chỉ IP</th>
+                    <th>Thiết bị / Trình duyệt</th>
+                    <th>Trang</th>
+                    <th>Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody id="adminVisitorsTableBody">
+                  <tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-2);">Đang tải dữ liệu...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 2: CẤM TRUY CẬP (BLACKLIST) -->
+        <div class="admin-tab-pane" id="adminPaneBan">
+          <div class="admin-card-inner">
+            <h4><span class="material-symbols-rounded">security</span> Thêm IP hoặc ID vào Danh Sách Cấm</h4>
+            <p style="font-size:13px; color:var(--text-2); margin-bottom:14px;">
+              Người dùng bị cấm sẽ bị ngắt kết nối ngay lập tức và trang web sẽ hiển thị thông báo lỗi 403.
+            </p>
+            <form id="adminBanForm" class="admin-ban-form">
+              <div class="compact-field" style="flex:1; min-width:200px;">
+                <label for="banIpInput"><span class="material-symbols-rounded">tag</span> Địa chỉ IP cần cấm:</label>
+                <input type="text" id="banIpInput" placeholder="Ví dụ: 14.162.x.x..." />
+              </div>
+              <div class="compact-field" style="flex:1; min-width:200px;">
+                <label for="banReasonInput"><span class="material-symbols-rounded">description</span> Lý do cấm:</label>
+                <input type="text" id="banReasonInput" placeholder="Spam, quấy phá..." value="Vi phạm nội quy" />
+              </div>
+              <button type="submit" class="btn primary" style="background:#ea4335; border-color:#ea4335; align-self:flex-end;">
+                <span class="material-symbols-rounded">block</span> Cấm truy cập ngay
+              </button>
+            </form>
+          </div>
+
+          <div class="admin-section-box">
+            <div class="admin-section-head">
+              <h4><span class="material-symbols-rounded">gavel</span> Danh sách đang bị cấm (<span id="bannedCountBadge">0</span>)</h4>
+            </div>
+            <div class="admin-table-container">
+              <table class="admin-table">
+                <thead>
+                  <tr>
+                    <th>IP / User ID</th>
+                    <th>Lý do</th>
+                    <th>Thời điểm cấm</th>
+                    <th>Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody id="adminBannedTableBody">
+                  <tr><td colspan="4" style="text-align:center; padding:20px; color:var(--text-2);">Chưa có ai bị cấm.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 3: QUẢN LÝ PHÒNG LIVE -->
+        <div class="admin-tab-pane" id="adminPaneRooms">
+          <div class="admin-section-box">
+            <div class="admin-section-head">
+              <h4><span class="material-symbols-rounded">hub</span> Các phòng Live đang hoạt động</h4>
+              <span id="adminLiveRoomsCountBadge" style="font-size:12px; color:var(--text-2);">0 phòng</span>
+            </div>
+            <div id="adminLiveRoomsList" class="admin-live-rooms-list">
+              <div style="text-align:center; color:var(--text-2); padding:30px;">Hiện không có phòng nào đang mở.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 4: PHÁT THÔNG BÁO MÁY CHỦ -->
+        <div class="admin-tab-pane" id="adminPaneBroadcast">
+          <div class="admin-card-inner">
+            <h4><span class="material-symbols-rounded">announcement</span> Phát thông báo trực tiếp tới toàn bộ người dùng</h4>
+            <p style="font-size:13px; color:var(--text-2); margin-bottom:14px;">
+              Thông báo sẽ được gửi theo thời gian thực tới tất cả máy tính & điện thoại đang mở trang web.
+            </p>
+            <form id="adminBroadcastForm">
+              <div class="compact-field">
+                <label for="adminBroadcastInput"><span class="material-symbols-rounded">chat</span> Nội dung thông báo:</label>
+                <textarea id="adminBroadcastInput" rows="3" placeholder="Ví dụ: Máy chủ chuẩn bị cập nhật... hoặc Chúc các bạn thi tốt!" style="width:100%; padding:12px; border-radius:12px; border:1px solid var(--border); background:var(--surface-2); color:var(--text); font-family:inherit; resize:vertical;"></textarea>
+              </div>
+              <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:14px;">
+                <button type="submit" class="btn primary">
+                  <span class="material-symbols-rounded">send</span> Gửi thông báo ngay
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
   <script src="data.js"></script>

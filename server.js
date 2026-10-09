@@ -36,13 +36,300 @@ function getLocalIpAddresses() {
 }
 
 // -------------------------------------------------------------
-// 1. Static HTTP Server
+// 1. Static HTTP Server & Admin System
 // -------------------------------------------------------------
+const ADMIN_PASS = '211008';
+
+const bannedIps = new Set();
+const bannedUsers = new Set();
+const bannedRecords = []; // { id, ip, userId, reason, bannedAt, timestamp }
+
+const analytics = {
+  startTime: Date.now(),
+  totalRequests: 0,
+  pageViews: 0,
+  uniqueIps: new Set(),
+  recentVisitors: [] // { ip, device, browser, path, time, date, timestamp }
+};
+
+function parseJsonBody(req) {
+  return new Promise((resolve) => {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > 1e6) req.destroy();
+    });
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(body || '{}'));
+      } catch (e) {
+        resolve({});
+      }
+    });
+  });
+}
+
+function getClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) {
+    return forwarded.split(',')[0].trim();
+  }
+  return req.socket.remoteAddress || '127.0.0.1';
+}
+
+function parseUserAgent(ua = '') {
+  let device = 'Máy tính (Desktop)';
+  if (/android/i.test(ua)) device = 'Android 📱';
+  else if (/iphone/i.test(ua)) device = 'iPhone 📱';
+  else if (/ipad/i.test(ua)) device = 'iPad 📟';
+  else if (/mobile/i.test(ua)) device = 'Mobile 📱';
+
+  let browser = 'Khác';
+  if (/edg/i.test(ua)) browser = 'Edge';
+  else if (/chrome|crios/i.test(ua)) browser = 'Chrome';
+  else if (/safari/i.test(ua)) browser = 'Safari';
+  else if (/firefox|fxios/i.test(ua)) browser = 'Firefox';
+
+  return { device, browser };
+}
+
+function verifyAdminAuth(req, body = {}) {
+  const headerKey = req.headers['x-admin-key'];
+  if (headerKey === ADMIN_PASS) return true;
+  if (body && body.adminKey === ADMIN_PASS) return true;
+  try {
+    const urlObj = new URL(req.url, 'http://localhost');
+    if (urlObj.searchParams.get('adminKey') === ADMIN_PASS) return true;
+  } catch (e) {}
+  return false;
+}
+
 let currentTunnelUrl = null;
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   let safePath = req.url.split('?')[0];
+  const clientIp = getClientIp(req);
 
+  // 1. Kiểm tra Cấm IP (Blacklist Ban Check)
+  if (bannedIps.has(clientIp) && !safePath.startsWith('/api/admin/')) {
+    res.writeHead(403, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end(`
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8"><title>403 - Cấm truy cập</title></head>
+      <body style="font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:60px 20px;background:#090d16;color:#f87171;">
+        <div style="max-width:480px;margin:0 auto;background:#131d2e;padding:36px;border-radius:18px;border:1px solid #ef444444;box-shadow:0 12px 40px rgba(0,0,0,0.5);">
+          <div style="font-size:48px;margin-bottom:12px;">🚫</div>
+          <h2 style="margin:0 0 10px;color:#fca5a5;font-size:22px;">Truy cập của bạn đã bị chặn</h2>
+          <p style="color:#94a3b8;font-size:14px;line-height:1.6;margin:0 0 16px;">Địa chỉ IP của bạn (<b>${clientIp}</b>) đã bị Quản Trị Viên đưa vào danh sách cấm truy cập hệ thống.</p>
+          <div style="font-size:12px;color:#64748b;">Mã kiểm soát bảo mật • Quiz Sinh Học & Khoa Học</div>
+        </div>
+      </body>
+      </html>
+    `);
+  }
+
+  // 2. Ghi nhận lưu lượng truy cập (Traffic Logging)
+  analytics.totalRequests++;
+  analytics.uniqueIps.add(clientIp);
+
+  if (safePath === '/' || safePath === '' || safePath === '/index.html') {
+    analytics.pageViews++;
+    const ua = req.headers['user-agent'] || '';
+    const { device, browser } = parseUserAgent(ua);
+    analytics.recentVisitors.unshift({
+      ip: clientIp,
+      device,
+      browser,
+      path: safePath || '/',
+      time: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      date: new Date().toLocaleDateString('vi-VN'),
+      timestamp: Date.now()
+    });
+    if (analytics.recentVisitors.length > 100) analytics.recentVisitors.pop();
+  }
+
+  // 3. API Quản Trị Viên (Admin APIs)
+  if (safePath === '/api/admin/login' && req.method === 'POST') {
+    const body = await parseJsonBody(req);
+    if (body.password === ADMIN_PASS) {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      return res.end(JSON.stringify({ success: true, key: ADMIN_PASS }));
+    } else {
+      res.writeHead(401, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      return res.end(JSON.stringify({ success: false, message: 'Mật khẩu quản trị viên không chính xác!' }));
+    }
+  }
+
+  if (safePath === '/api/admin/stats') {
+    if (!verifyAdminAuth(req)) {
+      res.writeHead(401, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      return res.end(JSON.stringify({ error: 'Unauthorized' }));
+    }
+
+    const uptimeSec = Math.floor((Date.now() - analytics.startTime) / 1000);
+    const hours = Math.floor(uptimeSec / 3600);
+    const minutes = Math.floor((uptimeSec % 3600) / 60);
+    const seconds = uptimeSec % 60;
+    const uptimeStr = `${hours}h ${minutes}m ${seconds}s`;
+
+    const activeRoomsData = Array.from(rooms.values()).map(r => ({
+      id: r.id,
+      mode: r.mode,
+      timerSeconds: r.timerSeconds,
+      subjectTitle: r.quizState ? r.quizState.subjectTitle : (r.subjectTitle || 'Chưa chọn môn'),
+      chapterTitle: r.quizState ? r.quizState.chapterTitle : '',
+      memberCount: r.members.size,
+      members: Array.from(r.members.values()).map(m => ({
+        id: m.id,
+        name: m.name,
+        isHost: m.isHost,
+        status: m.status,
+        activity: m.activity,
+        ip: m.ip || '127.0.0.1'
+      }))
+    }));
+
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    return res.end(JSON.stringify({
+      success: true,
+      stats: {
+        startTime: analytics.startTime,
+        uptime: uptimeStr,
+        uptimeSeconds: uptimeSec,
+        totalRequests: analytics.totalRequests,
+        pageViews: analytics.pageViews,
+        uniqueIpsCount: analytics.uniqueIps.size,
+        onlineUsersCount: wss.clients.size,
+        activeRoomsCount: rooms.size,
+        memoryUsageMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
+        bannedIpsCount: bannedIps.size,
+        bannedUsersCount: bannedUsers.size
+      },
+      recentVisitors: analytics.recentVisitors.slice(0, 50),
+      bannedRecords: bannedRecords,
+      activeRooms: activeRoomsData
+    }));
+  }
+
+  if (safePath === '/api/admin/ban' && req.method === 'POST') {
+    const body = await parseJsonBody(req);
+    if (!verifyAdminAuth(req, body)) {
+      res.writeHead(401, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      return res.end(JSON.stringify({ error: 'Unauthorized' }));
+    }
+
+    const { ip, userId, reason } = body;
+    const rec = {
+      id: 'ban_' + Date.now(),
+      ip: ip ? ip.trim() : null,
+      userId: userId ? userId.trim() : null,
+      reason: reason || 'Vi phạm chính sách / Admin ban',
+      bannedAt: new Date().toLocaleString('vi-VN'),
+      timestamp: Date.now()
+    };
+
+    if (rec.ip) bannedIps.add(rec.ip);
+    if (rec.userId) bannedUsers.add(rec.userId);
+    bannedRecords.unshift(rec);
+
+    // Ngắt kết nối ngay lập tức mọi client vi phạm
+    for (const client of wss.clients) {
+      if ((rec.ip && client.clientIp === rec.ip) || (rec.userId && client.userId === rec.userId)) {
+        try {
+          client.send(JSON.stringify({ type: 'error', message: 'Bạn đã bị Quản Trị Viên cấm truy cập hệ thống!' }));
+          client.close(4003, 'Banned by Admin');
+        } catch (e) {}
+      }
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    return res.end(JSON.stringify({ success: true, bannedRecords }));
+  }
+
+  if (safePath === '/api/admin/unban' && req.method === 'POST') {
+    const body = await parseJsonBody(req);
+    if (!verifyAdminAuth(req, body)) {
+      res.writeHead(401, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      return res.end(JSON.stringify({ error: 'Unauthorized' }));
+    }
+
+    const { banId, ip, userId } = body;
+    if (ip) bannedIps.delete(ip);
+    if (userId) bannedUsers.delete(userId);
+
+    const idx = bannedRecords.findIndex(r => r.id === banId || (ip && r.ip === ip) || (userId && r.userId === userId));
+    if (idx !== -1) {
+      const removed = bannedRecords.splice(idx, 1)[0];
+      if (removed.ip) bannedIps.delete(removed.ip);
+      if (removed.userId) bannedUsers.delete(removed.userId);
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    return res.end(JSON.stringify({ success: true, bannedRecords }));
+  }
+
+  if (safePath === '/api/admin/close-room' && req.method === 'POST') {
+    const body = await parseJsonBody(req);
+    if (!verifyAdminAuth(req, body)) {
+      res.writeHead(401, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      return res.end(JSON.stringify({ error: 'Unauthorized' }));
+    }
+
+    const { roomId, reason } = body;
+    const room = rooms.get(roomId);
+    if (room) {
+      broadcastToRoom(room, {
+        type: 'error',
+        message: `Phòng học đã bị Quản Trị Viên kết thúc: ${reason || 'Yêu cầu quản trị'}`
+      });
+      rooms.delete(roomId);
+      broadcastActiveRooms();
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    return res.end(JSON.stringify({ success: true }));
+  }
+
+  if (safePath === '/api/admin/kick' && req.method === 'POST') {
+    const body = await parseJsonBody(req);
+    if (!verifyAdminAuth(req, body)) {
+      res.writeHead(401, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      return res.end(JSON.stringify({ error: 'Unauthorized' }));
+    }
+
+    const { roomId, userId, reason } = body;
+    const room = rooms.get(roomId);
+    if (room) {
+      kickMember(room, userId);
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    return res.end(JSON.stringify({ success: true }));
+  }
+
+  if (safePath === '/api/admin/broadcast' && req.method === 'POST') {
+    const body = await parseJsonBody(req);
+    if (!verifyAdminAuth(req, body)) {
+      res.writeHead(401, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      return res.end(JSON.stringify({ error: 'Unauthorized' }));
+    }
+
+    const { message } = body;
+    const payload = JSON.stringify({
+      type: 'admin_broadcast',
+      message: message || 'Thông báo từ Quản Trị Viên'
+    });
+
+    for (const client of wss.clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(payload);
+      }
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    return res.end(JSON.stringify({ success: true }));
+  }
+
+  // 4. Các API thông thường
   if (safePath === '/api/tunnel-url') {
     res.writeHead(200, {
       'Content-Type': 'application/json',
@@ -182,7 +469,8 @@ function getMemberList(room) {
     score: m.score || 0,
     streak: m.streak || 0,
     voiceActive: !!m.voiceActive,
-    voiceMuted: !!m.voiceMuted
+    voiceMuted: !!m.voiceMuted,
+    ip: m.ip || '127.0.0.1'
   }));
 }
 
@@ -237,9 +525,19 @@ function kickMember(room, userId) {
   broadcastActiveRooms();
 }
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
   let currentRoom = null;
   let currentUserId = null;
+  const clientIp = getClientIp(req);
+  ws.clientIp = clientIp;
+
+  if (bannedIps.has(clientIp)) {
+    try {
+      ws.send(JSON.stringify({ type: 'error', message: 'Địa chỉ IP của bạn đã bị Quản Trị Viên cấm truy cập!' }));
+      ws.close(4003, 'Banned');
+    } catch (e) {}
+    return;
+  }
 
   // Heartbeat ping-pong để giữ kết nối sống trên mobile
   ws.isAlive = true;
@@ -262,14 +560,23 @@ wss.on('connection', (ws) => {
         // --- 1. THAM GIA HOẶC KẾT NỐI LẠI PHÒNG (RECONNECT) ---
         case 'join_room': {
           const roomId = (msg.roomId || 'SHDC').trim().toUpperCase();
+          const userId = (msg.userId || '').trim() || 'u_' + Math.random().toString(36).substring(2, 9);
+          const userName = (msg.userName || 'Bạn học').trim().substring(0, 20);
+
+          if (bannedUsers.has(userId) || bannedIps.has(clientIp)) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Tài khoản hoặc IP của bạn đã bị Quản Trị Viên cấm truy cập!' }));
+            ws.close(4003, 'Banned');
+            return;
+          }
+
+          ws.userId = userId;
+
           const room = getOrCreateRoom(roomId, {
             subjectId: msg.subjectId,
             subjectTitle: msg.subjectTitle,
             mode: msg.mode,
             timerSeconds: msg.timerSeconds
           });
-          const userId = (msg.userId || '').trim() || 'u_' + Math.random().toString(36).substring(2, 9);
-          const userName = (msg.userName || 'Bạn học').trim().substring(0, 20);
 
           currentRoom = room;
           currentUserId = userId;
@@ -284,6 +591,7 @@ wss.on('connection', (ws) => {
               member.kickTimer = null;
             }
             member.ws = ws;
+            member.ip = clientIp;
             member.status = 'online';
             member.activity = 'active';
             member.disconnectAt = null;
@@ -329,6 +637,7 @@ wss.on('connection', (ws) => {
               name: userName,
               isHost: isFirstUser,
               ws: ws,
+              ip: clientIp,
               status: 'online',
               activity: 'active',
               answerStatus: 'thinking',

@@ -1713,6 +1713,12 @@
           break;
         }
 
+        case 'admin_broadcast': {
+          showToast(`📢 THÔNG BÁO TỪ ADMIN: ${msg.message}`);
+          this.showSyncBanner(`📢 [ADMIN]: ${msg.message}`);
+          break;
+        }
+
         case 'error': {
           alert(msg.message);
           this.exitLiveMode();
@@ -1911,6 +1917,387 @@
     }
   };
 
+  // --- Admin Management System (Mật khẩu: 211008) ---
+  const AdminPanel = {
+    adminKey: localStorage.getItem('sh_admin_key') || null,
+    brandClickCount: 0,
+    brandClickTimer: null,
+
+    init() {
+      // 1. Nút ẩn góc màn hình
+      const secretBtn = document.getElementById('secretAdminTrigger');
+      if (secretBtn) {
+        secretBtn.addEventListener('click', () => this.promptLogin());
+      }
+
+      // 2. Nhấp 5 lần liên tiếp vào logo thương hiệu để mở Admin
+      const brandLogo = document.querySelector('.topbar-brand');
+      if (brandLogo) {
+        brandLogo.addEventListener('click', () => {
+          this.brandClickCount++;
+          clearTimeout(this.brandClickTimer);
+          if (this.brandClickCount >= 5) {
+            this.brandClickCount = 0;
+            this.promptLogin();
+          } else {
+            this.brandClickTimer = setTimeout(() => {
+              this.brandClickCount = 0;
+            }, 3000);
+          }
+        });
+      }
+
+      // 3. Phím tắt bí mật: Ctrl + Shift + A (hoặc Cmd + Shift + A)
+      window.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toUpperCase() === 'A') {
+          e.preventDefault();
+          this.promptLogin();
+        }
+      });
+
+      // 4. Modal Event Listeners
+      const closeLoginBtn = document.getElementById('closeAdminLoginModalBtn');
+      const cancelLoginBtn = document.getElementById('cancelAdminLoginModalBtn');
+      const loginForm = document.getElementById('adminLoginForm');
+      if (closeLoginBtn) closeLoginBtn.addEventListener('click', () => this.closeLoginModal());
+      if (cancelLoginBtn) cancelLoginBtn.addEventListener('click', () => this.closeLoginModal());
+
+      if (loginForm) {
+        loginForm.addEventListener('submit', (e) => {
+          e.preventDefault();
+          this.handleLogin();
+        });
+      }
+
+      const closeDashBtn = document.getElementById('closeAdminDashboardBtn');
+      const refreshBtn = document.getElementById('refreshAdminDataBtn');
+      if (closeDashBtn) closeDashBtn.addEventListener('click', () => this.closeDashboard());
+      if (refreshBtn) refreshBtn.addEventListener('click', () => this.fetchData());
+
+      // 5. Chuyển đổi các Tab quản trị
+      document.querySelectorAll('.admin-tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const tab = btn.dataset.tab;
+          this.switchTab(tab);
+        });
+      });
+
+      // 6. Form cấm truy cập
+      const banForm = document.getElementById('adminBanForm');
+      if (banForm) {
+        banForm.addEventListener('submit', (e) => {
+          e.preventDefault();
+          this.handleBanSubmit();
+        });
+      }
+
+      // 7. Form phát thông báo
+      const broadcastForm = document.getElementById('adminBroadcastForm');
+      if (broadcastForm) {
+        broadcastForm.addEventListener('submit', (e) => {
+          e.preventDefault();
+          this.handleBroadcastSubmit();
+        });
+      }
+    },
+
+    promptLogin() {
+      if (this.adminKey === '211008') {
+        this.openDashboard();
+        return;
+      }
+      const modal = document.getElementById('adminLoginModal');
+      const input = document.getElementById('adminPasswordInput');
+      const err = document.getElementById('adminLoginError');
+      if (err) err.classList.add('hidden');
+      if (input) input.value = '';
+      if (modal) modal.classList.remove('hidden');
+      if (input) setTimeout(() => input.focus(), 120);
+    },
+
+    closeLoginModal() {
+      const modal = document.getElementById('adminLoginModal');
+      if (modal) modal.classList.add('hidden');
+    },
+
+    async handleLogin() {
+      const input = document.getElementById('adminPasswordInput');
+      const err = document.getElementById('adminLoginError');
+      const pass = (input?.value || '').trim();
+
+      if (pass !== '211008') {
+        if (err) {
+          err.textContent = 'Mật khẩu quản trị viên không chính xác!';
+          err.classList.remove('hidden');
+        }
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pass })
+        });
+        const data = await res.json();
+        if (data.success) {
+          this.adminKey = pass;
+          localStorage.setItem('sh_admin_key', pass);
+          this.closeLoginModal();
+          this.openDashboard();
+          showToast('🛡️ Chào mừng bạn vào Bảng Quản Trị Hệ Thống!');
+        } else {
+          if (err) {
+            err.textContent = data.message || 'Mật khẩu sai!';
+            err.classList.remove('hidden');
+          }
+        }
+      } catch (e) {
+        if (pass === '211008') {
+          this.adminKey = pass;
+          this.closeLoginModal();
+          this.openDashboard();
+        }
+      }
+    },
+
+    openDashboard() {
+      const modal = document.getElementById('adminDashboardModal');
+      if (modal) modal.classList.remove('hidden');
+      this.fetchData();
+    },
+
+    closeDashboard() {
+      const modal = document.getElementById('adminDashboardModal');
+      if (modal) modal.classList.add('hidden');
+    },
+
+    switchTab(tabName) {
+      document.querySelectorAll('.admin-tab-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.tab === tabName);
+      });
+      document.querySelectorAll('.admin-tab-pane').forEach(p => {
+        p.classList.remove('active');
+      });
+      const target = document.getElementById('adminPane' + tabName.charAt(0).toUpperCase() + tabName.slice(1));
+      if (target) target.classList.add('active');
+    },
+
+    async fetchData() {
+      if (!this.adminKey) return;
+      try {
+        const res = await fetch('/api/admin/stats', {
+          headers: { 'x-admin-key': this.adminKey }
+        });
+        const data = await res.json();
+        if (data.success) {
+          this.renderStats(data);
+        }
+      } catch (e) {
+        console.error('[Admin Fetch Error]', e);
+      }
+    },
+
+    renderStats(data) {
+      const { stats, recentVisitors, bannedRecords, activeRooms } = data;
+
+      // 1. Chỉ số tổng quan
+      const elOnline = document.getElementById('statOnlineUsers');
+      const elTotal = document.getElementById('statTotalRequests');
+      const elIps = document.getElementById('statUniqueIps');
+      const elUptime = document.getElementById('statUptime');
+      if (elOnline) elOnline.textContent = stats.onlineUsersCount || 0;
+      if (elTotal) elTotal.textContent = `${stats.pageViews || 0} views / ${stats.totalRequests || 0} reqs`;
+      if (elIps) elIps.textContent = stats.uniqueIpsCount || 0;
+      if (elUptime) elUptime.textContent = `${stats.uptime || '0s'} • ${stats.memoryUsageMB || 0} MB RAM`;
+
+      // 2. Bảng 50 phiên truy cập gần nhất
+      const tbVisitors = document.getElementById('adminVisitorsTableBody');
+      if (tbVisitors) {
+        if (!recentVisitors || recentVisitors.length === 0) {
+          tbVisitors.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-2);">Chưa có phiên truy cập nào được ghi nhận.</td></tr>';
+        } else {
+          tbVisitors.innerHTML = recentVisitors.map(v => `
+            <tr>
+              <td><span style="font-size:12px; color:var(--text-2);">${v.time} (${v.date})</span></td>
+              <td><b style="font-family:monospace; color:var(--primary); font-size:13px;">${v.ip}</b></td>
+              <td>${v.device} • <span style="color:var(--text-2); font-size:11.5px;">${v.browser}</span></td>
+              <td><code style="font-size:11.5px; background:var(--surface-2); padding:2px 6px; border-radius:4px;">${v.path}</code></td>
+              <td>
+                <button type="button" class="btn outline sm" style="padding:2px 8px; font-size:11.5px; border-color:#ea4335; color:#ea4335;" onclick="window._adminQuickBan('${v.ip}')">
+                  🚫 Cấm IP
+                </button>
+              </td>
+            </tr>
+          `).join('');
+        }
+      }
+
+      // 3. Danh sách cấm truy cập
+      const bBadge = document.getElementById('bannedCountBadge');
+      if (bBadge) bBadge.textContent = bannedRecords ? bannedRecords.length : 0;
+      const tbBanned = document.getElementById('adminBannedTableBody');
+      if (tbBanned) {
+        if (!bannedRecords || bannedRecords.length === 0) {
+          tbBanned.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--text-2);">Chưa có IP hay User ID nào trong danh sách cấm.</td></tr>';
+        } else {
+          tbBanned.innerHTML = bannedRecords.map(b => `
+            <tr>
+              <td><b style="font-family:monospace; color:#ef4444; font-size:13px;">${b.ip || b.userId || 'Không rõ'}</b></td>
+              <td>${b.reason || 'N/A'}</td>
+              <td><span style="font-size:12px; color:var(--text-2);">${b.bannedAt || ''}</span></td>
+              <td>
+                <button type="button" class="btn outline sm" style="padding:2px 8px; font-size:11.5px; border-color:#34a853; color:#34a853;" onclick="window._adminUnban('${b.id}', '${b.ip || ''}', '${b.userId || ''}')">
+                  ✓ Gỡ cấm
+                </button>
+              </td>
+            </tr>
+          `).join('');
+        }
+      }
+
+      // 4. Phòng Live
+      const rBadge = document.getElementById('adminLiveRoomsCountBadge');
+      if (rBadge) rBadge.textContent = `${activeRooms ? activeRooms.length : 0} phòng`;
+      const roomsContainer = document.getElementById('adminLiveRoomsList');
+      if (roomsContainer) {
+        if (!activeRooms || activeRooms.length === 0) {
+          roomsContainer.innerHTML = '<div style="text-align:center; color:var(--text-2); padding:30px;">Hiện không có phòng nào đang mở.</div>';
+        } else {
+          roomsContainer.innerHTML = activeRooms.map(r => `
+            <div style="background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:10px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span class="room-code-badge">PHÒNG: ${r.id}</span>
+                  <span style="font-size:13.5px; font-weight:600;">${r.subjectTitle}</span>
+                  <span style="font-size:12px; color:var(--text-2);">(${r.memberCount}/10 bạn)</span>
+                </div>
+                <button type="button" class="btn outline sm" style="border-color:#ea4335; color:#ea4335; font-size:12px; padding:3px 10px;" onclick="window._adminCloseRoom('${r.id}')">
+                  Đóng phòng này
+                </button>
+              </div>
+              <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
+                ${r.members.map(m => `
+                  <span style="display:inline-flex; align-items:center; gap:6px; background:var(--surface-2); padding:4px 10px; border-radius:99px; font-size:12px; border:1px solid var(--border);">
+                    <b>${m.name}</b> ${m.isHost ? '👑' : ''} <span style="font-family:monospace; color:var(--text-2); font-size:11px;">(${m.ip})</span>
+                    <button type="button" style="background:none; border:none; color:#ea4335; cursor:pointer; padding:0 2px; font-weight:bold;" title="Kick bạn này" onclick="window._adminKickUser('${r.id}', '${m.id}')">✕</button>
+                  </span>
+                `).join('')}
+              </div>
+            </div>
+          `).join('');
+        }
+      }
+    },
+
+    async handleBanSubmit() {
+      const ipInput = document.getElementById('banIpInput');
+      const reasonInput = document.getElementById('banReasonInput');
+      const ip = (ipInput?.value || '').trim();
+      const reason = (reasonInput?.value || '').trim() || 'Quản Trị Viên cấm';
+
+      if (!ip) {
+        showToast('Vui lòng nhập địa chỉ IP hoặc User ID để cấm!');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/admin/ban', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-key': this.adminKey
+          },
+          body: JSON.stringify({ ip, reason })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(`🚫 Đã đưa IP ${ip} vào danh sách cấm!`);
+          if (ipInput) ipInput.value = '';
+          this.fetchData();
+        }
+      } catch (e) {
+        showToast('Lỗi khi cấm IP!');
+      }
+    },
+
+    async handleBroadcastSubmit() {
+      const input = document.getElementById('adminBroadcastInput');
+      const msg = (input?.value || '').trim();
+      if (!msg) {
+        showToast('Vui lòng nhập nội dung thông báo!');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/admin/broadcast', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-key': this.adminKey
+          },
+          body: JSON.stringify({ message: msg })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('📢 Đã phát thông báo thành công tới tất cả người dùng online!');
+          if (input) input.value = '';
+        }
+      } catch (e) {
+        showToast('Lỗi khi gửi thông báo!');
+      }
+    }
+  };
+
+  // Các hàm toàn cục cho thao tác nhanh trong Admin
+  window._adminQuickBan = (ip) => {
+    if (confirm(`Bạn có chắc chắn muốn CẤM truy cập địa chỉ IP ${ip} không?`)) {
+      fetch('/api/admin/ban', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-key': AdminPanel.adminKey || '211008' },
+        body: JSON.stringify({ ip, reason: 'Quản trị viên cấm nhanh' })
+      }).then(() => {
+        showToast(`🚫 Đã cấm IP ${ip}!`);
+        AdminPanel.fetchData();
+      });
+    }
+  };
+
+  window._adminUnban = (banId, ip, userId) => {
+    fetch('/api/admin/unban', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-key': AdminPanel.adminKey || '211008' },
+      body: JSON.stringify({ banId, ip, userId })
+    }).then(() => {
+      showToast(`✓ Đã gỡ cấm thành công!`);
+      AdminPanel.fetchData();
+    });
+  };
+
+  window._adminCloseRoom = (roomId) => {
+    if (confirm(`Bạn có chắc chắn muốn buộc ĐÓNG phòng ${roomId}?`)) {
+      fetch('/api/admin/close-room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-key': AdminPanel.adminKey || '211008' },
+        body: JSON.stringify({ roomId, reason: 'Quản trị viên đóng phòng' })
+      }).then(() => {
+        showToast(`Đã đóng phòng ${roomId}!`);
+        AdminPanel.fetchData();
+      });
+    }
+  };
+
+  window._adminKickUser = (roomId, userId) => {
+    fetch('/api/admin/kick', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-key': AdminPanel.adminKey || '211008' },
+      body: JSON.stringify({ roomId, userId, reason: 'Admin kick' })
+    }).then(() => {
+      showToast(`Đã kick người dùng khỏi phòng!`);
+      AdminPanel.fetchData();
+    });
+  };
+
   // --- Main Controller ---
   const App = {
     init() {
@@ -1921,6 +2308,7 @@
       FloatingChat.init();
       LiveLobby.init();
       VoiceChat.init();
+      AdminPanel.init();
       this.renderWelcome();
       this.renderSubjects();
       this.switchView('welcome');
