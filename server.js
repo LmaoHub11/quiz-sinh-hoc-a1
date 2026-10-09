@@ -527,7 +527,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('====================================================\n');
 
   // Khởi động Cloudflare Tunnel khi chạy local trên máy tính (nếu không phải môi trường Cloud như Render)
-  if (!process.env.RENDER && !process.env.RAILWAY_STATIC_URL && !process.env.VERCEL) {
+  if (!process.env.RENDER && !process.env.RAILWAY_STATIC_URL && !process.env.VERCEL && process.env.NODE_ENV !== 'production') {
     startCloudflareTunnel(PORT);
   }
 });
