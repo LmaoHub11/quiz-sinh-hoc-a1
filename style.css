@@ -1907,6 +1907,47 @@ kbd { font-family: inherit; font-size: 11px; padding: 1px 6px; border: 1px solid
   border-top: 1px solid var(--border);
 }
 
+.timer-segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  background: var(--surface-2);
+  padding: 4px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+}
+.timer-segmented button {
+  flex: 1;
+  min-width: 52px;
+  border-radius: 10px;
+  border: none !important;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+  background: transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+}
+.timer-segmented button:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+.timer-segmented button.on {
+  background: var(--primary) !important;
+  color: #fff !important;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(66, 133, 244, 0.35);
+}
+.timer-segmented button[data-timer="0"] {
+  flex: 2;
+  min-width: 130px;
+}
+
 @media (max-width: 600px) {
   main { padding: 20px 14px 48px; }
   .topbar { padding: 10px 14px; }

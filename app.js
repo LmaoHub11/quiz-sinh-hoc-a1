@@ -172,7 +172,7 @@
     // Live Co-op & Versus State (Phòng 10 người)
     liveMode: false,
     liveModeType: 'coop', // 'coop' | 'versus'
-    liveTimerSeconds: 30, // 15, 30, 45 giây mỗi câu
+    liveTimerSeconds: 0, // 0 = Không giới hạn, hoặc 30, 45, 60, 90 giây
     roomId: null,
     userName: localStorage.getItem('sh_username') || '',
     currentUser: null,
@@ -207,16 +207,26 @@
     };
   }
 
-  // --- Question Countdown Timer (30s / câu, khẩn cấp 5s cuối) ---
+  // --- Question Countdown Timer (Đếm ngược hoặc Không giới hạn thời gian) ---
   const QuestionTimer = {
-    totalSeconds: 30,
-    timeLeft: 30,
+    totalSeconds: 0,
+    timeLeft: 0,
     interval: null,
     active: false,
 
-    start(seconds = 30) {
+    start(seconds = 0) {
       this.stop();
-      this.totalSeconds = seconds || 30;
+      const s = parseInt(seconds, 10);
+      if (isNaN(s) || s <= 0) {
+        // Chế độ Không Giới Hạn: Ẩn thanh đếm ngược, nhóm thảo luận làm bài thoải mái
+        this.totalSeconds = 0;
+        this.timeLeft = 0;
+        this.active = false;
+        this.hide();
+        return;
+      }
+
+      this.totalSeconds = s;
       this.timeLeft = this.totalSeconds;
       this.active = true;
 
@@ -1134,21 +1144,23 @@
           const room = (roomInput?.value || '').trim().toUpperCase() || 'SHDC';
           const subjectId = subjectSelect?.value || 'sinh_hoc_a1';
           const mode = activeModeBtn?.dataset.mode || 'coop';
-          const timer = parseInt(activeTimerBtn?.dataset.timer, 10) || 30;
+          const rawTimer = activeTimerBtn?.dataset.timer;
+          const parsedTimer = rawTimer !== undefined ? parseInt(rawTimer, 10) : 0;
+          const finalTimer = isNaN(parsedTimer) ? 0 : parsedTimer;
 
           const courses = window.COURSES_DATA || window.SUBJECTS_DATA || [];
           const selectedCourse = courses.find(c => c.id === subjectId);
 
           State.currentSubjectId = subjectId;
           State.liveModeType = mode;
-          State.liveTimerSeconds = timer;
+          State.liveTimerSeconds = finalTimer;
 
           hideCreateModal();
           LiveRoom.connect(room, name, false, {
             subjectId: subjectId,
             subjectTitle: selectedCourse ? selectedCourse.title : 'Môn học',
             mode: mode,
-            timerSeconds: timer
+            timerSeconds: finalTimer
           });
         });
       }
@@ -1284,6 +1296,7 @@
       rooms.forEach(r => {
         const modeLabel = r.mode === 'versus' ? 'Versus ⚔️' : 'Co-op 👥';
         const modeClass = r.mode === 'versus' ? 'versus' : 'coop';
+        const timerLabel = (r.timerSeconds && r.timerSeconds > 0) ? `${r.timerSeconds}s/câu` : 'Không giới hạn ♾️';
         const statusText = r.hasStarted
           ? `🟢 Đang thi đấu (Câu ${(r.currentQuestionIndex || 0) + 1}/${r.questionCount || '?'})`
           : `⏳ Đang chờ người vào`;
@@ -1293,7 +1306,10 @@
             <div>
               <div class="room-card-head">
                 <span class="room-code-badge"><span class="live-dot-mini"></span> PHÒNG: ${r.id}</span>
-                <span class="room-mode-tag ${modeClass}">${modeLabel}</span>
+                <div style="display:flex; gap:6px; align-items:center;">
+                  <span class="room-mode-tag ${modeClass}">${modeLabel}</span>
+                  <span style="font-size:11px; padding:2px 7px; border-radius:99px; background:var(--surface-2); border:1px solid var(--border); color:var(--text-2);">⏱️ ${timerLabel}</span>
+                </div>
               </div>
               <div class="room-subject-title">
                 <span class="material-symbols-rounded" style="color:var(--primary); font-size:20px;">school</span>
@@ -1463,7 +1479,7 @@
 
           if (msg.quizState) {
             State.liveModeType = msg.quizState.mode || 'coop';
-            State.liveTimerSeconds = msg.quizState.timerSeconds || 30;
+            State.liveTimerSeconds = msg.quizState.timerSeconds !== undefined ? msg.quizState.timerSeconds : 0;
           }
 
           this.updateRoomBar();
@@ -1584,7 +1600,7 @@
           State.userAnswers = msg.quizState.userAnswers || {};
           State.chapterTitle = msg.quizState.chapterTitle;
           State.liveModeType = msg.quizState.mode || 'coop';
-          State.liveTimerSeconds = msg.quizState.timerSeconds || 30;
+          State.liveTimerSeconds = msg.quizState.timerSeconds !== undefined ? msg.quizState.timerSeconds : 0;
           State.members = msg.members || State.members;
 
           document.getElementById('quizChapter').textContent = State.chapterTitle;
@@ -1733,7 +1749,8 @@
 
         if (modeBadge) {
           const isVersus = State.liveModeType === 'versus';
-          modeBadge.textContent = isVersus ? 'Versus (Đấu điểm)' : 'Co-op (Học chung)';
+          const timerLabel = (State.liveTimerSeconds && State.liveTimerSeconds > 0) ? `${State.liveTimerSeconds}s/câu` : 'Không giới hạn ♾️';
+          modeBadge.textContent = `${isVersus ? 'Versus (Đấu điểm)' : 'Co-op (Học chung)'} • ${timerLabel}`;
           modeBadge.className = 'live-mode-badge ' + (isVersus ? 'versus' : '');
         }
 
@@ -2179,7 +2196,7 @@
           chapterTitle: title,
           questions: prepared,
           mode: State.liveModeType || 'coop',
-          timerSeconds: State.liveTimerSeconds || 30
+          timerSeconds: State.liveTimerSeconds !== undefined ? State.liveTimerSeconds : 0
         });
       }
 
@@ -2188,7 +2205,7 @@
       this.switchView('quiz');
       this.renderCurrentQuestion();
       this.updateDrawerGrid();
-      QuestionTimer.start(State.liveTimerSeconds || 30);
+      QuestionTimer.start(State.liveTimerSeconds);
     },
 
     // --- Shuffle Quiz on the Fly (Nút xáo trộn trong màn hình Quiz) ---
@@ -2221,7 +2238,7 @@
       this.saveSession();
       this.renderCurrentQuestion();
       this.updateDrawerGrid();
-      QuestionTimer.start(State.liveTimerSeconds || 30);
+      QuestionTimer.start(State.liveTimerSeconds);
     },
 
     // --- Render Question Card ---
@@ -2343,13 +2360,17 @@
       if (State.liveMode && State.liveModeType === 'versus') {
         let points = 0;
         if (isCorrect) {
-          const t = Math.max(0, QuestionTimer.timeLeft || 0);
-          const tot = QuestionTimer.totalSeconds || 30;
-          if (t >= tot - 3) {
+          if (!QuestionTimer.totalSeconds || QuestionTimer.totalSeconds <= 0) {
             points = 1000;
           } else {
-            const ratio = t / Math.max(1, tot - 3);
-            points = Math.max(200, Math.round(200 + 800 * ratio));
+            const t = Math.max(0, QuestionTimer.timeLeft || 0);
+            const tot = QuestionTimer.totalSeconds;
+            if (t >= tot - 3) {
+              points = 1000;
+            } else {
+              const ratio = t / Math.max(1, tot - 3);
+              points = Math.max(200, Math.round(200 + 800 * ratio));
+            }
           }
           const myMember = State.members.find(m => m.id === State.currentUser?.id);
           const currentStreak = ((myMember?.streak || 0) + 1);
@@ -2482,7 +2503,7 @@
           }
           this.renderCurrentQuestion();
           this.toggleDrawer(false);
-          QuestionTimer.start(State.liveTimerSeconds || 30);
+          QuestionTimer.start(State.liveTimerSeconds);
         });
         grid.appendChild(btn);
       });
@@ -2507,7 +2528,7 @@
             qIndex: State.currentIndex
           });
         }
-        QuestionTimer.start(State.liveTimerSeconds || 30);
+        QuestionTimer.start(State.liveTimerSeconds);
         this.renderCurrentQuestion();
       } else {
         QuestionTimer.hide();
@@ -2524,7 +2545,7 @@
             qIndex: State.currentIndex
           });
         }
-        QuestionTimer.start(State.liveTimerSeconds || 30);
+        QuestionTimer.start(State.liveTimerSeconds);
         this.renderCurrentQuestion();
       }
     },
@@ -3003,7 +3024,7 @@
         });
       }
 
-      // Lựa chọn thời gian mỗi câu (15s, 30s, 45s)
+      // Lựa chọn thời gian mỗi câu (Không giới hạn, 30s, 45s, 60s, 90s)
       const timerSelector = document.getElementById('liveTimerSelector');
       if (timerSelector) {
         timerSelector.addEventListener('click', (e) => {
@@ -3011,8 +3032,9 @@
           if (!btn) return;
           timerSelector.querySelectorAll('button').forEach(b => b.classList.remove('on'));
           btn.classList.add('on');
-          State.liveTimerSeconds = parseInt(btn.dataset.timer, 10) || 30;
-          showToast(`Thời gian làm bài: ${State.liveTimerSeconds}s / câu`);
+          const t = parseInt(btn.dataset.timer, 10);
+          State.liveTimerSeconds = isNaN(t) ? 0 : t;
+          showToast(State.liveTimerSeconds > 0 ? `Thời gian làm bài: ${State.liveTimerSeconds}s / câu` : 'Thời gian làm bài: Không giới hạn (học nhóm thoải mái)');
         });
       }
 

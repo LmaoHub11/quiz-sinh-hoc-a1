@@ -104,17 +104,17 @@ function getOrCreateRoom(roomId, options = {}) {
       quizState: null,    // current active synchronized quiz state
       messages: [],       // chat history
       mode: options.mode || 'coop',
-      timerSeconds: options.timerSeconds || 30,
+      timerSeconds: options.timerSeconds !== undefined ? parseInt(options.timerSeconds, 10) : 0,
       subjectId: options.subjectId || null,
       subjectTitle: options.subjectTitle || null,
       createdAt: Date.now()
     });
-  } else if (options.subjectId || options.mode) {
+  } else if (options.subjectId || options.mode || options.timerSeconds !== undefined) {
     const r = rooms.get(id);
     if (options.subjectId && !r.subjectId) r.subjectId = options.subjectId;
     if (options.subjectTitle && !r.subjectTitle) r.subjectTitle = options.subjectTitle;
     if (options.mode) r.mode = options.mode;
-    if (options.timerSeconds) r.timerSeconds = options.timerSeconds;
+    if (options.timerSeconds !== undefined) r.timerSeconds = parseInt(options.timerSeconds, 10);
   }
   return rooms.get(id);
 }
@@ -133,7 +133,9 @@ function getActiveRoomsList() {
         onlineCount: onlineCount,
         maxMembers: MAX_ROOM_USERS,
         mode: room.mode || (room.quizState ? room.quizState.mode : 'coop'),
-        timerSeconds: room.timerSeconds || (room.quizState ? room.quizState.timerSeconds : 30),
+        timerSeconds: (room.quizState && room.quizState.timerSeconds !== undefined)
+          ? room.quizState.timerSeconds
+          : (room.timerSeconds !== undefined ? room.timerSeconds : 0),
         subjectId: room.quizState ? room.quizState.subjectId : (room.subjectId || null),
         subjectTitle: room.quizState ? room.quizState.subjectTitle : (room.subjectTitle || 'Chưa chọn môn'),
         chapterTitle: room.quizState ? room.quizState.chapterTitle : '',
@@ -371,7 +373,8 @@ wss.on('connection', (ws) => {
           const byName = member ? member.name : 'Một bạn';
 
           const mode = msg.mode === 'versus' ? 'versus' : 'coop';
-          const timerSeconds = parseInt(msg.timerSeconds, 10) || 30;
+          const rawTimer = msg.timerSeconds !== undefined ? parseInt(msg.timerSeconds, 10) : (currentRoom.timerSeconds !== undefined ? currentRoom.timerSeconds : 0);
+          const timerSeconds = isNaN(rawTimer) ? 0 : rawTimer;
 
           // Reset điểm số và trạng thái trả lời của toàn bộ thành viên
           for (const m of currentRoom.members.values()) {
@@ -446,16 +449,21 @@ wss.on('connection', (ws) => {
           const { qIndex, optIndex, isCorrect, timeLeft, totalTime } = msg;
 
           // Tính điểm:
-          // Trả lời đúng trong 3 giây đầu nhận tối đa 1000 điểm; thời gian còn lại điểm giảm dần về tối thiểu 200đ
+          // Nếu không giới hạn thời gian (totalTime <= 0): nhận đủ 1000 điểm khi trả lời đúng
+          // Nếu có đếm ngược: Trả lời đúng trong 3 giây đầu nhận tối đa 1000 điểm; thời gian còn lại điểm giảm dần về tối thiểu 200đ
           let points = 0;
           if (isCorrect) {
-            const t = Math.max(0, timeLeft !== undefined ? timeLeft : 0);
-            const tot = totalTime || 30;
-            if (t >= tot - 3) {
+            if (!totalTime || totalTime <= 0) {
               points = 1000;
             } else {
-              const remainingRatio = t / Math.max(1, tot - 3);
-              points = Math.max(200, Math.round(200 + 800 * remainingRatio));
+              const t = Math.max(0, timeLeft !== undefined ? timeLeft : 0);
+              const tot = totalTime;
+              if (t >= tot - 3) {
+                points = 1000;
+              } else {
+                const remainingRatio = t / Math.max(1, tot - 3);
+                points = Math.max(200, Math.round(200 + 800 * remainingRatio));
+              }
             }
             member.streak = (member.streak || 0) + 1;
             // Thưởng thêm chuỗi đúng (Streak bonus)

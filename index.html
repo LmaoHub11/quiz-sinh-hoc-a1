@@ -732,11 +732,15 @@
 
         <!-- 5. Thời gian mỗi câu -->
         <div class="compact-field">
-          <label><span class="material-symbols-rounded">timer</span> Thời gian mỗi câu:</label>
-          <div class="segmented" id="modalTimerSelector">
-            <button type="button" data-timer="15">15 giây</button>
-            <button type="button" data-timer="30" class="on">30 giây</button>
-            <button type="button" data-timer="45">45 giây</button>
+          <label><span class="material-symbols-rounded">timer</span> Thời gian làm mỗi câu:</label>
+          <div class="segmented timer-segmented" id="modalTimerSelector">
+            <button type="button" data-timer="0" class="on">
+              <span class="material-symbols-rounded" style="font-size:16px; vertical-align:middle;">all_inclusive</span> Không giới hạn
+            </button>
+            <button type="button" data-timer="30">30s</button>
+            <button type="button" data-timer="45">45s</button>
+            <button type="button" data-timer="60">60s</button>
+            <button type="button" data-timer="90">90s</button>
           </div>
         </div>
       </div>
