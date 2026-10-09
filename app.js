@@ -283,13 +283,71 @@
     }
   };
 
-  // --- WebRTC Voice Chat Manager (P2P Mesh qua STUN Google) ---
+  // --- WebRTC Voice Chat Manager (P2P Mesh - Perfect Negotiation & Mobile Audio Fix) ---
   const VoiceChat = {
     localStream: null,
-    peers: new Map(), // userId -> RTCPeerConnection
+    audioCtx: null,
+    peers: new Map(), // userId -> peerData { pc, targetUserId, makingOffer, ignoreOffer, isPolite, candidatesQueue, hasRemoteDescription }
     audioElements: new Map(), // userId -> HTMLAudioElement
     joined: false,
     muted: false,
+
+    init() {
+      // Mở khóa hệ thống AudioContext & HTMLAudioElement trên Mobile khi người dùng chạm bất kỳ đâu
+      const unlockAudio = () => {
+        try {
+          if (!this.audioCtx) {
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            if (AudioContextClass) {
+              this.audioCtx = new AudioContextClass();
+            }
+          }
+          if (this.audioCtx && this.audioCtx.state === 'suspended') {
+            this.audioCtx.resume();
+          }
+        } catch (e) {}
+
+        this.resumeAllAudio();
+      };
+
+      window.addEventListener('click', unlockAudio, { passive: true });
+      window.addEventListener('touchstart', unlockAudio, { passive: true });
+      window.addEventListener('touchend', unlockAudio, { passive: true });
+    },
+
+    resumeAllAudio() {
+      this.audioElements.forEach((audio) => {
+        if (audio && audio.srcObject) {
+          audio.volume = 1.0;
+          audio.muted = false;
+          if (audio.paused) {
+            audio.play().catch(() => {});
+          }
+        }
+      });
+      this.hideAudioUnlockBanner();
+    },
+
+    showAudioUnlockBanner() {
+      let banner = document.getElementById('audioUnlockBanner');
+      if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'audioUnlockBanner';
+        banner.className = 'audio-unlock-toast';
+        banner.innerHTML = `
+          <span class="material-symbols-rounded">volume_up</span>
+          <span>Chạm vào đây để bật loa nghe bạn bè nói</span>
+        `;
+        banner.addEventListener('click', () => this.resumeAllAudio());
+        document.body.appendChild(banner);
+      }
+      banner.classList.remove('hidden');
+    },
+
+    hideAudioUnlockBanner() {
+      const banner = document.getElementById('audioUnlockBanner');
+      if (banner) banner.classList.add('hidden');
+    },
 
     async toggleMic() {
       if (!this.joined) {
@@ -305,8 +363,24 @@
         return;
       }
 
+      this.resumeAllAudio();
+
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        let stream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true
+            },
+            video: false
+          });
+        } catch (err) {
+          console.warn('[WebRTC] Thử lại getUserMedia với audio: true cơ bản...', err);
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        }
+
         this.localStream = stream;
         this.joined = true;
         this.muted = false;
@@ -320,14 +394,45 @@
           voiceMuted: false
         });
 
+        // 1. Gắn audio track vào tất cả các peer connection đã tạo
+        this.peers.forEach((peerData) => {
+          this.attachLocalTracksToPc(peerData.pc);
+        });
+
+        // 2. Khởi tạo kết nối tới các thành viên online khác chưa có peer
         State.members.forEach(m => {
           if (m.id !== State.currentUser?.id && m.status === 'online') {
-            this.initPeer(m.id, true);
+            this.getOrCreatePeer(m.id);
           }
         });
       } catch (err) {
         console.error('[Voice Error]', err);
         showToast('Không thể bật Mic: Vui lòng cho phép quyền Microphone trong trình duyệt!');
+      }
+    },
+
+    attachLocalTracksToPc(pc) {
+      if (!this.localStream) return;
+      const audioTrack = this.localStream.getAudioTracks()[0];
+      if (!audioTrack) return;
+
+      const transceivers = pc.getTransceivers ? pc.getTransceivers() : [];
+      const audioTransceiver = transceivers.find(t => t.receiver && t.receiver.track && t.receiver.track.kind === 'audio')
+        || transceivers.find(t => t.sender && t.sender.track && t.sender.track.kind === 'audio');
+
+      if (audioTransceiver) {
+        audioTransceiver.direction = 'sendrecv';
+        if (audioTransceiver.sender) {
+          audioTransceiver.sender.replaceTrack(audioTrack);
+        }
+      } else {
+        const senders = pc.getSenders ? pc.getSenders() : [];
+        const existingSender = senders.find(s => s.track && s.track.kind === 'audio');
+        if (existingSender) {
+          existingSender.replaceTrack(audioTrack);
+        } else {
+          pc.addTrack(audioTrack, this.localStream);
+        }
       }
     },
 
@@ -352,15 +457,45 @@
         this.localStream.getTracks().forEach(t => t.stop());
         this.localStream = null;
       }
-      this.peers.forEach(pc => {
-        try { pc.close(); } catch (e) {}
+      this.peers.forEach(peerData => {
+        try { peerData.pc.close(); } catch (e) {}
       });
       this.peers.clear();
-      this.audioElements.forEach(el => el.remove());
+      this.audioElements.forEach(el => {
+        try {
+          el.pause();
+          el.srcObject = null;
+          el.remove();
+        } catch (e) {}
+      });
       this.audioElements.clear();
       this.joined = false;
       this.muted = false;
       this.updateBtnUI();
+      this.hideAudioUnlockBanner();
+
+      LiveRoom.send({
+        type: 'voice_mute_state',
+        voiceActive: false,
+        voiceMuted: false
+      });
+    },
+
+    removePeer(targetUserId) {
+      const peerData = this.peers.get(targetUserId);
+      if (peerData) {
+        try { peerData.pc.close(); } catch (e) {}
+        this.peers.delete(targetUserId);
+      }
+      const audio = this.audioElements.get(targetUserId);
+      if (audio) {
+        try {
+          audio.pause();
+          audio.srcObject = null;
+          audio.remove();
+        } catch (e) {}
+        this.audioElements.delete(targetUserId);
+      }
     },
 
     updateBtnUI() {
@@ -384,31 +519,70 @@
       }
     },
 
-    initPeer(targetUserId, isInitiator) {
-      if (this.peers.has(targetUserId)) return this.peers.get(targetUserId);
-
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-      });
-
-      this.peers.set(targetUserId, pc);
-
-      if (this.localStream) {
-        this.localStream.getTracks().forEach(track => {
-          pc.addTrack(track, this.localStream);
-        });
+    getOrCreatePeer(targetUserId) {
+      if (this.peers.has(targetUserId)) {
+        return this.peers.get(targetUserId);
       }
 
-      pc.ontrack = (event) => {
-        let audio = this.audioElements.get(targetUserId);
-        if (!audio) {
-          audio = new Audio();
-          audio.autoplay = true;
-          this.audioElements.set(targetUserId, audio);
-        }
-        audio.srcObject = event.streams[0];
+      console.log(`[WebRTC] Tạo kết nối đàm thoại P2P với ${targetUserId}`);
+
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+          { urls: 'stun:stun3.l.google.com:19302' },
+          { urls: 'stun:stun.cloudflare.com:3478' }
+        ]
+      });
+
+      const myId = State.currentUser?.id || '';
+      // Deterministic polite peer (giải quyết 100% hiện tượng xung đột offer glare)
+      const isPolite = myId > targetUserId;
+
+      const peerData = {
+        pc,
+        targetUserId,
+        makingOffer: false,
+        ignoreOffer: false,
+        isPolite,
+        candidatesQueue: [],
+        hasRemoteDescription: false
       };
 
+      this.peers.set(targetUserId, peerData);
+
+      // Cấu hình transceiver audio: nếu có mic thì gửi, chưa bật mic thì sẵn sàng nhận (recvonly)
+      try {
+        if (this.localStream) {
+          this.attachLocalTracksToPc(pc);
+        } else if (pc.addTransceiver) {
+          pc.addTransceiver('audio', { direction: 'recvonly' });
+        }
+      } catch (e) {
+        console.warn('[WebRTC Transceiver init]', e);
+      }
+
+      // 1. Tự động đàm phán lại khi có track mới (Perfect Negotiation)
+      pc.onnegotiationneeded = async () => {
+        try {
+          peerData.makingOffer = true;
+          const offer = await pc.createOffer();
+          if (pc.signalingState !== 'stable') return;
+          await pc.setLocalDescription(offer);
+          LiveRoom.send({
+            type: 'voice_signal',
+            targetUserId: targetUserId,
+            signal: { sdp: pc.localDescription }
+          });
+        } catch (err) {
+          console.error(`[WebRTC Negotiation Error ${targetUserId}]`, err);
+        } finally {
+          peerData.makingOffer = false;
+        }
+      };
+
+      // 2. Trao đổi ICE candidate
       pc.onicecandidate = (event) => {
         if (event.candidate) {
           LiveRoom.send({
@@ -419,35 +593,105 @@
         }
       };
 
-      if (isInitiator) {
-        pc.onnegotiationneeded = async () => {
-          try {
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            LiveRoom.send({
-              type: 'voice_signal',
-              targetUserId: targetUserId,
-              signal: { sdp: pc.localDescription }
-            });
-          } catch (e) {
-            console.error('[Peer Offer Error]', e);
-          }
-        };
-      }
+      // 3. Nhận audio track từ bạn học (Khắc phục triệt để lỗi Mobile không phát tiếng)
+      pc.ontrack = (event) => {
+        console.log(`[WebRTC] Đã nhận luồng âm thanh từ ${targetUserId}`);
+        let audio = this.audioElements.get(targetUserId);
+        if (!audio) {
+          audio = document.createElement('audio');
+          audio.id = `remote_audio_${targetUserId}`;
+          audio.autoplay = true;
+          audio.playsInline = true;
+          audio.setAttribute('playsinline', '');
+          audio.setAttribute('webkit-playsinline', '');
+          audio.muted = false;
+          audio.volume = 1.0;
 
-      return pc;
+          let container = document.getElementById('webrtcAudioContainer');
+          if (!container) {
+            container = document.createElement('div');
+            container.id = 'webrtcAudioContainer';
+            container.style.position = 'fixed';
+            container.style.bottom = '0';
+            container.style.left = '0';
+            container.style.width = '0';
+            container.style.height = '0';
+            container.style.overflow = 'hidden';
+            container.style.pointerEvents = 'none';
+            container.style.zIndex = '-1';
+            document.body.appendChild(container);
+          }
+          container.appendChild(audio);
+          this.audioElements.set(targetUserId, audio);
+        }
+
+        const stream = (event.streams && event.streams[0]) ? event.streams[0] : new MediaStream([event.track]);
+        audio.srcObject = stream;
+        audio.volume = 1.0;
+        audio.muted = false;
+
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.then(() => {
+            console.log(`[WebRTC] Loa đang phát giọng nói từ ${targetUserId}`);
+            this.hideAudioUnlockBanner();
+          }).catch((err) => {
+            console.warn(`[WebRTC Autoplay Policy] Trình duyệt điện thoại cần chạm màn hình để phát âm thanh:`, err);
+            this.showAudioUnlockBanner();
+          });
+        }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        console.log(`[WebRTC ICE ${targetUserId}] Trạng thái kết nối: ${pc.iceConnectionState}`);
+        if (pc.iceConnectionState === 'failed') {
+          if (peerData.isPolite && pc.restartIce) {
+            try { pc.restartIce(); } catch (e) {}
+          }
+        }
+      };
+
+      return peerData;
     },
 
     async handleSignal(senderUserId, signal) {
-      let pc = this.peers.get(senderUserId);
-      if (!pc) {
-        pc = this.initPeer(senderUserId, false);
-      }
+      const peerData = this.getOrCreatePeer(senderUserId);
+      const { pc } = peerData;
 
       try {
         if (signal.sdp) {
-          await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
-          if (signal.sdp.type === 'offer') {
+          const description = new RTCSessionDescription(signal.sdp);
+          const readyForOffer = !peerData.makingOffer && (pc.signalingState === 'stable' || pc.signalingState === 'have-remote-offer');
+          const offerCollision = description.type === 'offer' && !readyForOffer;
+
+          peerData.ignoreOffer = !peerData.isPolite && offerCollision;
+          if (peerData.ignoreOffer) {
+            console.warn(`[WebRTC] Glare: Bên impolite bỏ qua offer từ ${senderUserId}`);
+            return;
+          }
+
+          if (offerCollision && peerData.isPolite) {
+            console.warn(`[WebRTC] Glare: Bên polite rollback để chấp nhận offer từ ${senderUserId}`);
+            await pc.setLocalDescription({ type: 'rollback' });
+          }
+
+          await pc.setRemoteDescription(description);
+          peerData.hasRemoteDescription = true;
+
+          // Giải phóng các ICE candidate đã nhận trước khi có Remote Description
+          while (peerData.candidatesQueue.length > 0) {
+            const c = peerData.candidatesQueue.shift();
+            try {
+              await pc.addIceCandidate(c);
+            } catch (e) {
+              console.warn('[WebRTC Candidate Error]', e);
+            }
+          }
+
+          if (description.type === 'offer') {
+            if (this.localStream) {
+              this.attachLocalTracksToPc(pc);
+            }
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             LiveRoom.send({
@@ -457,10 +701,15 @@
             });
           }
         } else if (signal.candidate) {
-          await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+          const candidate = new RTCIceCandidate(signal.candidate);
+          if (peerData.hasRemoteDescription && pc.remoteDescription) {
+            await pc.addIceCandidate(candidate);
+          } else {
+            peerData.candidatesQueue.push(candidate);
+          }
         }
-      } catch (e) {
-        console.error('[Handle Signal Error]', e);
+      } catch (err) {
+        console.error(`[WebRTC Signal Error ${senderUserId}]`, err);
       }
     }
   };
@@ -1222,6 +1471,15 @@
           this.renderMessages(msg.messages || []);
           VoiceChat.updateBtnUI();
 
+          // Nếu có thành viên đang bật mic trong phòng, chủ động kết nối để sẵn sàng nghe
+          if (State.members && State.members.length > 0) {
+            State.members.forEach(m => {
+              if (m.id !== State.currentUser?.id && m.voiceActive) {
+                VoiceChat.getOrCreatePeer(m.id);
+              }
+            });
+          }
+
           if (msg.reconnected) {
             showToast(`Đã khôi phục kết nối vào phòng ${msg.roomId}! (${State.members.length}/10 bạn)`);
           } else {
@@ -1263,6 +1521,7 @@
 
         case 'user_kicked': {
           State.members = msg.members || [];
+          if (msg.userId) VoiceChat.removePeer(msg.userId);
           if (msg.newHostId && State.currentUser && msg.newHostId === State.currentUser.id) {
             State.currentUser.isHost = true;
           }
@@ -1296,11 +1555,15 @@
           showToast(msg.message);
           this.addSystemMessage(msg.message);
           Sound.shuffle();
+          if (msg.user && msg.user.id !== State.currentUser?.id && VoiceChat.joined) {
+            VoiceChat.getOrCreatePeer(msg.user.id);
+          }
           break;
         }
 
         case 'user_left': {
           State.members = msg.members || [];
+          if (msg.userId) VoiceChat.removePeer(msg.userId);
           if (msg.newHostId && State.currentUser && msg.newHostId === State.currentUser.id) {
             State.currentUser.isHost = true;
           }
@@ -1428,6 +1691,9 @@
         case 'voice_mute_changed': {
           State.members = msg.members || State.members;
           this.renderMembers();
+          if (msg.voiceActive && msg.userId !== State.currentUser?.id) {
+            VoiceChat.getOrCreatePeer(msg.userId);
+          }
           break;
         }
 
@@ -1637,6 +1903,7 @@
       Sidebar.renderSubjectList();
       FloatingChat.init();
       LiveLobby.init();
+      VoiceChat.init();
       this.renderWelcome();
       this.renderSubjects();
       this.switchView('welcome');
