@@ -156,7 +156,7 @@
 
   // --- App State ---
   const State = {
-    currentView: 'home', // 'home' | 'quiz' | 'result'
+    currentView: 'welcome', // 'welcome' | 'subjects' | 'liveLobby' | 'quiz' | 'result'
     currentSubjectId: null, // Ban đầu khi mở trang web thì user chưa chọn môn nào
     activeChapterId: null,
     chapterTitle: '',
@@ -699,28 +699,30 @@
       if (closeBtn) closeBtn.addEventListener('click', () => this.toggle(false));
       if (scrim) scrim.addEventListener('click', () => this.toggle(false));
 
-      const scrollToLive = () => {
+      // Nút Trang chủ và Danh mục trên Sidebar
+      const sidebarHomeBtn = document.getElementById('sidebarHomeBtn');
+      const sidebarSubjectsBtn = document.getElementById('sidebarSubjectsBtn');
+      if (sidebarHomeBtn) {
+        sidebarHomeBtn.addEventListener('click', () => {
+          this.toggle(false);
+          App.switchView('welcome');
+        });
+      }
+      if (sidebarSubjectsBtn) {
+        sidebarSubjectsBtn.addEventListener('click', () => {
+          this.toggle(false);
+          App.switchView('subjects');
+        });
+      }
+
+      // Nút Phòng Live trên Sidebar & Topbar
+      const goToLive = () => {
         this.toggle(false);
-        if (!State.currentSubjectId) {
-          const courses = window.COURSES_DATA || window.SUBJECTS_DATA || [];
-          if (courses.length > 0) {
-            State.currentSubjectId = courses[0].id;
-            App.renderHome();
-          }
-        }
-        App.switchView('home');
-        setTimeout(() => {
-          const liveCard = document.getElementById('liveCard');
-          if (liveCard) {
-            liveCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            liveCard.style.outline = '2px solid var(--primary)';
-            setTimeout(() => liveCard.style.outline = 'none', 1800);
-          }
-        }, 200);
+        App.switchView('liveLobby');
       };
 
-      if (quickLiveBtn) quickLiveBtn.addEventListener('click', scrollToLive);
-      if (sidebarLiveBtn) sidebarLiveBtn.addEventListener('click', scrollToLive);
+      if (quickLiveBtn) quickLiveBtn.addEventListener('click', goToLive);
+      if (sidebarLiveBtn) sidebarLiveBtn.addEventListener('click', goToLive);
 
       if (addSubjectBtn) {
         addSubjectBtn.addEventListener('click', () => {
@@ -773,7 +775,8 @@
           const sId = btn.dataset.subjectId;
           if (sId) {
             State.currentSubjectId = sId;
-            App.renderHome();
+            App.switchView('subjects');
+            App.renderSubjects();
             this.toggle(false);
             showToast(`Đã chọn môn: ${App.getCurrentCourse()?.title}`);
             const wrap = document.getElementById('subjectContentWrap');
@@ -784,6 +787,290 @@
     }
   };
 
+  // --- Sảnh Phòng Live Độc Lập (Live Lobby Controller) ---
+  const LiveLobby = {
+    activeRooms: [],
+    pendingJoinRoomId: null,
+
+    init() {
+      // 1. Nút mở modal tạo phòng
+      const openModalBtn = document.getElementById('lobbyOpenCreateModalBtn');
+      const emptyCreateBtn = document.getElementById('emptyCreateRoomBtn');
+      const quickLaunchBtn = document.getElementById('quickLaunchLiveForSubjectBtn');
+
+      if (openModalBtn) openModalBtn.addEventListener('click', () => this.openCreateModal());
+      if (emptyCreateBtn) emptyCreateBtn.addEventListener('click', () => this.openCreateModal());
+      if (quickLaunchBtn) quickLaunchBtn.addEventListener('click', () => {
+        this.openCreateModal(State.currentSubjectId);
+      });
+
+      // 2. Nút làm mới danh sách phòng
+      const refreshBtn = document.getElementById('lobbyRefreshBtn');
+      if (refreshBtn) refreshBtn.addEventListener('click', () => {
+        this.fetchActiveRooms();
+        showToast('Đang cập nhật danh sách phòng Live...');
+      });
+
+      // 3. Vào nhanh bằng mã phòng
+      const quickJoinBtn = document.getElementById('lobbyQuickJoinBtn');
+      const quickCodeInput = document.getElementById('lobbyQuickCodeInput');
+      if (quickJoinBtn && quickCodeInput) {
+        quickJoinBtn.addEventListener('click', () => {
+          const code = (quickCodeInput.value || '').trim().toUpperCase();
+          if (!code) {
+            showToast('Vui lòng nhập mã phòng!');
+            return;
+          }
+          this.joinRoom(code);
+        });
+      }
+
+      // 4. Modal tạo phòng nhỏ gọn
+      const createModal = document.getElementById('createRoomModal');
+      const closeModalBtn = document.getElementById('closeCreateRoomModalBtn');
+      const cancelModalBtn = document.getElementById('cancelCreateRoomModalBtn');
+      const confirmCreateBtn = document.getElementById('confirmCreateRoomModalBtn');
+      const modalSubjectSelect = document.getElementById('modalSubjectSelect');
+      const modalRoomInput = document.getElementById('modalRoomIdInput');
+
+      const hideCreateModal = () => {
+        if (createModal) createModal.classList.add('hidden');
+      };
+      if (closeModalBtn) closeModalBtn.addEventListener('click', hideCreateModal);
+      if (cancelModalBtn) cancelModalBtn.addEventListener('click', hideCreateModal);
+
+      if (modalSubjectSelect) {
+        modalSubjectSelect.addEventListener('change', () => {
+          const sId = modalSubjectSelect.value;
+          const courses = window.COURSES_DATA || window.SUBJECTS_DATA || [];
+          const c = courses.find(x => x.id === sId);
+          if (c && modalRoomInput) {
+            const prefix = (c.code || c.id).replace(/[^a-zA-Z0-9]/g, '').toUpperCase().substring(0, 6);
+            modalRoomInput.value = prefix ? `${prefix}` : 'LIVE';
+          }
+        });
+      }
+
+      // Chế độ thi đấu trong modal
+      const modalModeSelector = document.getElementById('modalModeSelector');
+      if (modalModeSelector) {
+        modalModeSelector.addEventListener('click', (e) => {
+          const btn = e.target.closest('button[data-mode]');
+          if (!btn) return;
+          modalModeSelector.querySelectorAll('button').forEach(b => b.classList.remove('on'));
+          btn.classList.add('on');
+        });
+      }
+
+      // Thời gian mỗi câu trong modal
+      const modalTimerSelector = document.getElementById('modalTimerSelector');
+      if (modalTimerSelector) {
+        modalTimerSelector.addEventListener('click', (e) => {
+          const btn = e.target.closest('button[data-timer]');
+          if (!btn) return;
+          modalTimerSelector.querySelectorAll('button').forEach(b => b.classList.remove('on'));
+          btn.classList.add('on');
+        });
+      }
+
+      if (confirmCreateBtn) {
+        confirmCreateBtn.addEventListener('click', () => {
+          const nameInput = document.getElementById('modalUserNameInput');
+          const roomInput = document.getElementById('modalRoomIdInput');
+          const subjectSelect = document.getElementById('modalSubjectSelect');
+          const activeModeBtn = document.querySelector('#modalModeSelector button.on');
+          const activeTimerBtn = document.querySelector('#modalTimerSelector button.on');
+
+          const name = (nameInput?.value || '').trim() || 'Bạn ' + Math.floor(Math.random() * 90 + 10);
+          const room = (roomInput?.value || '').trim().toUpperCase() || 'SHDC';
+          const subjectId = subjectSelect?.value || 'sinh_hoc_a1';
+          const mode = activeModeBtn?.dataset.mode || 'coop';
+          const timer = parseInt(activeTimerBtn?.dataset.timer, 10) || 30;
+
+          const courses = window.COURSES_DATA || window.SUBJECTS_DATA || [];
+          const selectedCourse = courses.find(c => c.id === subjectId);
+
+          State.currentSubjectId = subjectId;
+          State.liveModeType = mode;
+          State.liveTimerSeconds = timer;
+
+          hideCreateModal();
+          LiveRoom.connect(room, name, false, {
+            subjectId: subjectId,
+            subjectTitle: selectedCourse ? selectedCourse.title : 'Môn học',
+            mode: mode,
+            timerSeconds: timer
+          });
+        });
+      }
+
+      // 5. Modal nhập tên nhanh khi bấm "Tham Gia"
+      const quickJoinModal = document.getElementById('quickJoinModal');
+      const closeQjBtn = document.getElementById('closeQuickJoinModalBtn');
+      const cancelQjBtn = document.getElementById('cancelQuickJoinModalBtn');
+      const confirmQjBtn = document.getElementById('confirmQuickJoinModalBtn');
+      const qjInput = document.getElementById('quickJoinUserNameInput');
+
+      const hideQjModal = () => {
+        if (quickJoinModal) quickJoinModal.classList.add('hidden');
+        this.pendingJoinRoomId = null;
+      };
+      if (closeQjBtn) closeQjBtn.addEventListener('click', hideQjModal);
+      if (cancelQjBtn) cancelQjBtn.addEventListener('click', hideQjModal);
+
+      if (confirmQjBtn) {
+        confirmQjBtn.addEventListener('click', () => {
+          const name = (qjInput?.value || '').trim() || 'Bạn ' + Math.floor(Math.random() * 90 + 10);
+          localStorage.setItem('sh_username', name);
+          const rId = this.pendingJoinRoomId;
+          hideQjModal();
+          if (rId) {
+            LiveRoom.connect(rId, name);
+          }
+        });
+      }
+
+      // 6. Delegation cho nút "Tham Gia" trên các thẻ phòng
+      const roomsGrid = document.getElementById('activeRoomsGrid');
+      if (roomsGrid) {
+        roomsGrid.addEventListener('click', (e) => {
+          const btn = e.target.closest('.lobby-join-room-btn');
+          if (!btn) return;
+          const roomId = btn.dataset.roomId;
+          const subjectId = btn.dataset.subjectId;
+          if (subjectId) {
+            State.currentSubjectId = subjectId;
+          }
+          if (roomId) {
+            this.joinRoom(roomId);
+          }
+        });
+      }
+    },
+
+    openCreateModal(preselectedSubjectId = null) {
+      const modal = document.getElementById('createRoomModal');
+      const select = document.getElementById('modalSubjectSelect');
+      const nameInput = document.getElementById('modalUserNameInput');
+      const roomInput = document.getElementById('modalRoomIdInput');
+      if (!modal || !select) return;
+
+      const courses = window.COURSES_DATA || window.SUBJECTS_DATA || [];
+      select.innerHTML = '';
+      courses.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = `${c.title} (${c.chapters.length} chương)`;
+        select.appendChild(opt);
+      });
+
+      const chosenSubject = preselectedSubjectId || State.currentSubjectId || (courses[0] ? courses[0].id : '');
+      if (chosenSubject) {
+        select.value = chosenSubject;
+      }
+
+      const savedName = localStorage.getItem('sh_username') || '';
+      if (nameInput) nameInput.value = savedName;
+
+      const currentCourse = courses.find(c => c.id === select.value);
+      if (roomInput && currentCourse) {
+        const prefix = (currentCourse.code || currentCourse.id).replace(/[^a-zA-Z0-9]/g, '').toUpperCase().substring(0, 6);
+        roomInput.value = prefix ? `${prefix}` : 'SHDC';
+      }
+
+      modal.classList.remove('hidden');
+    },
+
+    joinRoom(roomId) {
+      const savedName = localStorage.getItem('sh_username');
+      if (!savedName) {
+        this.pendingJoinRoomId = roomId;
+        const modal = document.getElementById('quickJoinModal');
+        const title = document.getElementById('quickJoinTitle');
+        const input = document.getElementById('quickJoinUserNameInput');
+        if (title) title.textContent = `Tham Gia Phòng: ${roomId}`;
+        if (modal) modal.classList.remove('hidden');
+        if (input) setTimeout(() => input.focus(), 100);
+      } else {
+        LiveRoom.connect(roomId, savedName);
+      }
+    },
+
+    fetchActiveRooms() {
+      // 1. Qua WebSocket nếu đang kết nối
+      if (LiveRoom.ws && LiveRoom.ws.readyState === WebSocket.OPEN) {
+        LiveRoom.send({ type: 'get_active_rooms' });
+      }
+
+      // 2. Fetch API HTTP
+      fetch('/api/active-rooms')
+        .then(res => res.json())
+        .then(rooms => {
+          this.renderActiveRooms(rooms);
+        })
+        .catch(() => {});
+    },
+
+    renderActiveRooms(rooms = []) {
+      this.activeRooms = rooms;
+      const grid = document.getElementById('activeRoomsGrid');
+      const empty = document.getElementById('emptyRoomsState');
+      const badge = document.getElementById('activeRoomsCountBadge');
+
+      if (badge) {
+        badge.textContent = `${rooms.length} phòng đang mở`;
+      }
+
+      if (!grid) return;
+
+      if (!rooms || rooms.length === 0) {
+        grid.innerHTML = '';
+        if (empty) empty.classList.remove('hidden');
+        return;
+      }
+
+      if (empty) empty.classList.add('hidden');
+
+      let html = '';
+      rooms.forEach(r => {
+        const modeLabel = r.mode === 'versus' ? 'Versus ⚔️' : 'Co-op 👥';
+        const modeClass = r.mode === 'versus' ? 'versus' : 'coop';
+        const statusText = r.hasStarted
+          ? `🟢 Đang thi đấu (Câu ${(r.currentQuestionIndex || 0) + 1}/${r.questionCount || '?'})`
+          : `⏳ Đang chờ người vào`;
+
+        html += `
+          <div class="active-room-card">
+            <div>
+              <div class="room-card-head">
+                <span class="room-code-badge"><span class="live-dot-mini"></span> PHÒNG: ${r.id}</span>
+                <span class="room-mode-tag ${modeClass}">${modeLabel}</span>
+              </div>
+              <div class="room-subject-title">
+                <span class="material-symbols-rounded" style="color:var(--primary); font-size:20px;">school</span>
+                <span>${r.subjectTitle || 'Chưa chọn môn'}</span>
+              </div>
+              <div class="room-host-line">
+                <span>Chủ phòng: <b>${r.hostName || 'Host'}</b> 👑</span>
+              </div>
+            </div>
+
+            <div class="room-stats-row">
+              <span class="room-status-indicator">${statusText}</span>
+              <span><b>${r.memberCount || 1}/${r.maxMembers || 10}</b> bạn</span>
+            </div>
+
+            <button class="btn primary full lobby-join-room-btn" data-room-id="${r.id}" data-subject-id="${r.subjectId || ''}">
+              <span class="material-symbols-rounded">sensors</span> Tham gia ngay
+            </button>
+          </div>
+        `;
+      });
+
+      grid.innerHTML = html;
+    }
+  };
+
   // --- Live Room WebSocket Controller (Phòng 10 người, Co-op & Versus) ---
   const LiveRoom = {
     ws: null,
@@ -791,6 +1078,7 @@
     bannerTimer: null,
     manualLeave: false,
     reconnectTimer: null,
+    lastOptions: {},
 
     getUserId() {
       let uid = localStorage.getItem('sh_user_id');
@@ -833,12 +1121,13 @@
     checkAndReconnect() {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         console.log('[LiveRoom] Tab active trở lại, tiến hành kết nối lại...');
-        this.connect(State.roomId || 'SHDC', State.userName || 'Bạn học', true);
+        this.connect(State.roomId || 'SHDC', State.userName || 'Bạn học', true, this.lastOptions);
       }
     },
 
-    connect(roomId, userName, isReconnecting = false) {
+    connect(roomId, userName, isReconnecting = false, options = {}) {
       this.manualLeave = false;
+      this.lastOptions = options || {};
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
@@ -871,7 +1160,11 @@
           type: 'join_room',
           roomId: roomId,
           userId: userId,
-          userName: userName
+          userName: userName,
+          subjectId: options.subjectId,
+          subjectTitle: options.subjectTitle,
+          mode: options.mode,
+          timerSeconds: options.timerSeconds
         });
       };
 
@@ -909,6 +1202,11 @@
 
     handleMessage(msg) {
       switch (msg.type) {
+        case 'active_rooms_update': {
+          LiveLobby.renderActiveRooms(msg.rooms || []);
+          break;
+        }
+
         case 'room_joined': {
           State.roomId = msg.roomId;
           State.currentUser = msg.user;
@@ -944,7 +1242,9 @@
             App.updateDrawerGrid();
             QuestionTimer.start(State.liveTimerSeconds);
           } else if (!msg.reconnected) {
-            showToast('Bạn đã vào phòng! Hãy chọn 1 chương ở dưới để cả phòng cùng làm nhé.');
+            App.switchView('subjects');
+            App.renderSubjects();
+            showToast(`Đã vào phòng ${msg.roomId}! Hãy chọn 1 chương bên dưới để bắt đầu.`);
           }
           break;
         }
@@ -1324,6 +1624,7 @@
       State.roomId = null;
       this.updateRoomBar();
       showToast('Đã rời khỏi phòng học Live.');
+      App.switchView('liveLobby');
     }
   };
 
@@ -1335,7 +1636,10 @@
       Sidebar.init();
       Sidebar.renderSubjectList();
       FloatingChat.init();
-      this.renderHome();
+      LiveLobby.init();
+      this.renderWelcome();
+      this.renderSubjects();
+      this.switchView('welcome');
       this.bindEvents();
       this.checkResumeState();
       LiveRoom.init();
@@ -1361,6 +1665,23 @@
       document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
       const target = document.getElementById(viewName + 'View');
       if (target) target.classList.add('active');
+
+      const navHome = document.getElementById('navHomeBtn');
+      const navSubjects = document.getElementById('navSubjectsBtn');
+      const navLive = document.getElementById('navLiveLobbyBtn');
+
+      if (navHome) navHome.classList.toggle('active', viewName === 'welcome');
+      if (navSubjects) navSubjects.classList.toggle('active', viewName === 'subjects');
+      if (navLive) navLive.classList.toggle('active', viewName === 'liveLobby');
+
+      if (viewName === 'welcome') {
+        this.renderWelcome();
+      } else if (viewName === 'subjects') {
+        this.renderSubjects();
+      } else if (viewName === 'liveLobby') {
+        LiveLobby.fetchActiveRooms();
+      }
+
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
 
@@ -1370,8 +1691,59 @@
       return courses.find(c => c.id === State.currentSubjectId) || null;
     },
 
-    // --- Home View & Chapter selection ---
+    renderWelcome() {
+      const grid = document.getElementById('welcomeCoursesGrid');
+      if (!grid) return;
+      const courses = window.COURSES_DATA || window.SUBJECTS_DATA || [];
+      let html = '';
+      courses.forEach(c => {
+        const totalQ = c.chapters.reduce((sum, ch) => sum + ch.questions.length, 0);
+        html += `
+          <div class="course-preview-card" data-course-id="${c.id}">
+            <div class="course-preview-top">
+              <div class="course-preview-icon" style="color:${c.color || 'var(--primary)'}">
+                <span class="material-symbols-rounded">${c.icon || 'school'}</span>
+              </div>
+              <div class="course-preview-info">
+                <h4>${c.title}</h4>
+                <p>${c.description || ''}</p>
+              </div>
+            </div>
+            <div class="course-preview-bottom">
+              <div class="course-preview-stats">
+                <span class="material-symbols-rounded" style="font-size:16px;">quiz</span>
+                <span>${c.chapters.length} chương · ${totalQ} câu</span>
+              </div>
+              <button class="btn outline sm start-course-btn" data-course-id="${c.id}">
+                Học môn này <span class="material-symbols-rounded">arrow_forward</span>
+              </button>
+            </div>
+          </div>
+        `;
+      });
+      grid.innerHTML = html;
+
+      grid.querySelectorAll('.course-preview-card').forEach(card => {
+        card.addEventListener('click', () => {
+          const cId = card.dataset.courseId;
+          if (cId) {
+            State.currentSubjectId = cId;
+            App.switchView('subjects');
+            App.renderSubjects();
+            showToast(`Đã chọn môn: ${App.getCurrentCourse()?.title}`);
+            const wrap = document.getElementById('subjectContentWrap');
+            if (wrap) wrap.scrollIntoView({ behavior: 'smooth' });
+          }
+        });
+      });
+    },
+
     renderHome() {
+      this.renderSubjects();
+    },
+
+    // --- Subjects View & Chapter selection ---
+    renderSubjects() {
       Sidebar.renderSubjectList();
       const subjectGrid = document.getElementById('subjectGrid');
       const courses = window.COURSES_DATA || window.SUBJECTS_DATA || [];
@@ -2120,18 +2492,45 @@
       // Theme toggle
       document.getElementById('themeBtn').addEventListener('click', () => this.toggleTheme());
 
-      // Brand / Home click
-      document.getElementById('homeBtn').addEventListener('click', () => {
-        if (State.currentView === 'quiz') {
-          if (confirm('Bạn có muốn tạm dừng bài kiểm tra và quay về trang chủ?')) {
-            this.saveSession();
-            this.checkResumeState();
-            this.switchView('home');
+      // Brand / Home click -> Về Trang Giới thiệu
+      const homeBtn = document.getElementById('homeBtn');
+      if (homeBtn) {
+        homeBtn.addEventListener('click', () => {
+          if (State.currentView === 'quiz') {
+            if (confirm('Bạn có muốn tạm dừng bài kiểm tra và quay về trang chủ?')) {
+              this.saveSession();
+              this.checkResumeState();
+              this.switchView('welcome');
+            }
+          } else {
+            this.switchView('welcome');
           }
-        } else {
-          this.switchView('home');
-        }
-      });
+        });
+      }
+
+      // Topbar Navigation Links
+      const navHomeBtn = document.getElementById('navHomeBtn');
+      if (navHomeBtn) navHomeBtn.addEventListener('click', () => this.switchView('welcome'));
+
+      const navSubjectsBtn = document.getElementById('navSubjectsBtn');
+      if (navSubjectsBtn) navSubjectsBtn.addEventListener('click', () => this.switchView('subjects'));
+
+      const navLiveLobbyBtn = document.getElementById('navLiveLobbyBtn');
+      if (navLiveLobbyBtn) navLiveLobbyBtn.addEventListener('click', () => this.switchView('liveLobby'));
+
+      // Welcome View CTA buttons
+      const welcomeStartBtn = document.getElementById('welcomeStartBtn');
+      if (welcomeStartBtn) welcomeStartBtn.addEventListener('click', () => this.switchView('subjects'));
+
+      const welcomeLiveBtn = document.getElementById('welcomeLiveBtn');
+      if (welcomeLiveBtn) welcomeLiveBtn.addEventListener('click', () => this.switchView('liveLobby'));
+
+      // Breadcrumb / Back to welcome buttons
+      const subjectsBackWelcomeBtn = document.getElementById('subjectsBackWelcomeBtn');
+      if (subjectsBackWelcomeBtn) subjectsBackWelcomeBtn.addEventListener('click', () => this.switchView('welcome'));
+
+      const lobbyBackWelcomeBtn = document.getElementById('lobbyBackWelcomeBtn');
+      if (lobbyBackWelcomeBtn) lobbyBackWelcomeBtn.addEventListener('click', () => this.switchView('welcome'));
 
       // Subject Selection Delegation
       const subjectGrid = document.getElementById('subjectGrid');
@@ -2260,31 +2659,39 @@
         this.shuffleCurrentQuiz();
         this.switchView('quiz');
       });
-      document.getElementById('backHomeBtn').addEventListener('click', () => {
-        this.checkResumeState();
-        this.switchView('home');
-      });
+      const backHomeBtn = document.getElementById('backHomeBtn');
+      if (backHomeBtn) {
+        backHomeBtn.addEventListener('click', () => {
+          this.checkResumeState();
+          this.switchView('welcome');
+        });
+      }
 
       // Review filter toggle
       const reviewFilter = document.getElementById('reviewFilter');
-      reviewFilter.addEventListener('click', (e) => {
-        const btn = e.target.closest('button');
-        if (!btn) return;
-        reviewFilter.querySelectorAll('button').forEach(b => b.classList.remove('on'));
-        btn.classList.add('on');
-        State.reviewFilter = btn.dataset.f;
-        this.renderReviewList();
-      });
+      if (reviewFilter) {
+        reviewFilter.addEventListener('click', (e) => {
+          const btn = e.target.closest('button');
+          if (!btn) return;
+          reviewFilter.querySelectorAll('button').forEach(b => b.classList.remove('on'));
+          btn.classList.add('on');
+          State.reviewFilter = btn.dataset.f;
+          this.renderReviewList();
+        });
+      }
 
-      // Live Room Events
-      document.getElementById('joinRoomBtn').addEventListener('click', () => {
-        const nameInput = document.getElementById('userNameInput');
-        const roomInput = document.getElementById('roomIdInput');
-        const name = (nameInput.value || '').trim() || 'Bạn ' + Math.floor(Math.random() * 90 + 10);
-        const room = (roomInput.value || '').trim() || 'SHDC';
-        nameInput.value = name;
-        LiveRoom.connect(room, name);
-      });
+      // Live Room Events (nếu có form inline)
+      const joinRoomBtn = document.getElementById('joinRoomBtn');
+      if (joinRoomBtn) {
+        joinRoomBtn.addEventListener('click', () => {
+          const nameInput = document.getElementById('userNameInput');
+          const roomInput = document.getElementById('roomIdInput');
+          const name = (nameInput?.value || '').trim() || 'Bạn ' + Math.floor(Math.random() * 90 + 10);
+          const room = (roomInput?.value || '').trim() || 'SHDC';
+          if (nameInput) nameInput.value = name;
+          LiveRoom.connect(room, name);
+        });
+      }
 
       const shareBtn = document.getElementById('shareRoomBtn');
       if (shareBtn) {

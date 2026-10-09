@@ -51,6 +51,14 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify({ url: currentTunnelUrl }));
   }
 
+  if (safePath === '/api/active-rooms') {
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return res.end(JSON.stringify(getActiveRoomsList()));
+  }
+
   if (safePath === '/' || safePath === '') safePath = '/index.html';
 
   const filePath = path.join(ROOT_DIR, path.normalize(safePath));
@@ -86,17 +94,70 @@ const wss = new WebSocketServer({ server });
 // Map: roomId -> Room object
 const rooms = new Map();
 
-function getOrCreateRoom(roomId) {
+function getOrCreateRoom(roomId, options = {}) {
   const id = (roomId || 'SHDC').trim().toUpperCase();
   if (!rooms.has(id)) {
     rooms.set(id, {
       id,
+      name: id,
       members: new Map(), // userId -> Member object { id, name, isHost, ws, status, kickTimer, disconnectAt }
       quizState: null,    // current active synchronized quiz state
-      messages: []        // chat history
+      messages: [],       // chat history
+      mode: options.mode || 'coop',
+      timerSeconds: options.timerSeconds || 30,
+      subjectId: options.subjectId || null,
+      subjectTitle: options.subjectTitle || null,
+      createdAt: Date.now()
     });
+  } else if (options.subjectId || options.mode) {
+    const r = rooms.get(id);
+    if (options.subjectId && !r.subjectId) r.subjectId = options.subjectId;
+    if (options.subjectTitle && !r.subjectTitle) r.subjectTitle = options.subjectTitle;
+    if (options.mode) r.mode = options.mode;
+    if (options.timerSeconds) r.timerSeconds = options.timerSeconds;
   }
   return rooms.get(id);
+}
+
+function getActiveRoomsList() {
+  const list = [];
+  for (const room of rooms.values()) {
+    if (room.members.size > 0) {
+      const host = Array.from(room.members.values()).find(m => m.isHost) || Array.from(room.members.values())[0];
+      const onlineCount = Array.from(room.members.values()).filter(m => m.status === 'online').length;
+      list.push({
+        id: room.id,
+        name: room.name || room.id,
+        hostName: host ? host.name : 'Chủ phòng',
+        memberCount: room.members.size,
+        onlineCount: onlineCount,
+        maxMembers: MAX_ROOM_USERS,
+        mode: room.mode || (room.quizState ? room.quizState.mode : 'coop'),
+        timerSeconds: room.timerSeconds || (room.quizState ? room.quizState.timerSeconds : 30),
+        subjectId: room.quizState ? room.quizState.subjectId : (room.subjectId || null),
+        subjectTitle: room.quizState ? room.quizState.subjectTitle : (room.subjectTitle || 'Chưa chọn môn'),
+        chapterTitle: room.quizState ? room.quizState.chapterTitle : '',
+        questionCount: room.quizState && room.quizState.questions ? room.quizState.questions.length : 0,
+        currentQuestionIndex: room.quizState ? (room.quizState.currentIndex || 0) : 0,
+        hasStarted: !!(room.quizState && room.quizState.questions && room.quizState.questions.length > 0),
+        createdAt: room.createdAt || Date.now()
+      });
+    }
+  }
+  list.sort((a, b) => b.onlineCount - a.onlineCount || a.id.localeCompare(b.id));
+  return list;
+}
+
+function broadcastActiveRooms() {
+  const payload = JSON.stringify({
+    type: 'active_rooms_update',
+    rooms: getActiveRoomsList()
+  });
+  for (const client of wss.clients) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(payload);
+    }
+  }
 }
 
 function broadcastToRoom(room, data, excludeWs = null) {
@@ -170,6 +231,8 @@ function kickMember(room, userId) {
   if (room.members.size === 0) {
     rooms.delete(room.id);
   }
+
+  broadcastActiveRooms();
 }
 
 wss.on('connection', (ws) => {
@@ -185,10 +248,24 @@ wss.on('connection', (ws) => {
       const msg = JSON.parse(raw);
 
       switch (msg.type) {
+        // --- 0. LẤY DANH SÁCH PHÒNG ĐANG HOẠT ĐỘNG (LOBBY) ---
+        case 'get_active_rooms': {
+          ws.send(JSON.stringify({
+            type: 'active_rooms_update',
+            rooms: getActiveRoomsList()
+          }));
+          break;
+        }
+
         // --- 1. THAM GIA HOẶC KẾT NỐI LẠI PHÒNG (RECONNECT) ---
         case 'join_room': {
           const roomId = (msg.roomId || 'SHDC').trim().toUpperCase();
-          const room = getOrCreateRoom(roomId);
+          const room = getOrCreateRoom(roomId, {
+            subjectId: msg.subjectId,
+            subjectTitle: msg.subjectTitle,
+            mode: msg.mode,
+            timerSeconds: msg.timerSeconds
+          });
           const userId = (msg.userId || '').trim() || 'u_' + Math.random().toString(36).substring(2, 9);
           const userName = (msg.userName || 'Bạn học').trim().substring(0, 20);
 
@@ -231,6 +308,8 @@ wss.on('connection', (ws) => {
               members: getMemberList(room),
               message: `${member.name} đã kết nối lại phòng!`
             }, ws);
+
+            broadcastActiveRooms();
 
           } else {
             // Người mới tham gia: kiểm tra xem phòng đã đủ 10 người chưa
@@ -279,6 +358,8 @@ wss.on('connection', (ws) => {
               members: getMemberList(room),
               message: `${member.name} vừa tham gia phòng!`
             }, ws);
+
+            broadcastActiveRooms();
           }
           break;
         }
@@ -301,6 +382,8 @@ wss.on('connection', (ws) => {
 
           currentRoom.mode = mode;
           currentRoom.timerSeconds = timerSeconds;
+          if (msg.subjectId) currentRoom.subjectId = msg.subjectId;
+          if (msg.subjectTitle) currentRoom.subjectTitle = msg.subjectTitle;
 
           currentRoom.quizState = {
             subjectId: msg.subjectId,
@@ -323,6 +406,8 @@ wss.on('connection', (ws) => {
             members: getMemberList(currentRoom),
             userName: byName
           });
+
+          broadcastActiveRooms();
           break;
         }
 
@@ -588,6 +673,7 @@ wss.on('connection', (ws) => {
               if (currentRoom.members.size === 0) {
                 rooms.delete(currentRoom.id);
               }
+              broadcastActiveRooms();
             }
             currentRoom = null;
             currentUserId = null;
@@ -622,6 +708,8 @@ wss.on('connection', (ws) => {
           members: getMemberList(currentRoom),
           message: `${member.name} tạm ngắt kết nối (giữ chỗ trong ${KICK_TIMEOUT_MS/1000}s)...`
         });
+
+        broadcastActiveRooms();
 
         // Bắt đầu hẹn giờ: nếu quá thời gian không quay lại thì KICK
         member.kickTimer = setTimeout(() => {
