@@ -15,10 +15,10 @@
   <!-- ========== HEADER ========== -->
   <header class="topbar">
     <button class="brand" id="homeBtn" title="Về trang chủ">
-      <span class="brand-logo"><span class="material-symbols-rounded">quiz</span></span>
+      <span class="brand-logo"><span class="material-symbols-rounded">school</span></span>
       <span class="brand-text">
-        <strong>Quiz Sinh học A1</strong>
-        <small>Đề cương ôn tập giữa kỳ</small>
+        <strong id="topbarBrandTitle">Quiz NotebookLM</strong>
+        <small id="topbarBrandSub">Đa môn học · Ôn thi & Live Co-op</small>
       </span>
     </button>
     <div class="topbar-actions">
@@ -31,10 +31,21 @@
   <main>
     <!-- ========== HOME ========== -->
     <section id="homeView" class="view active">
-      <div class="hero">
-        <div class="hero-chip"><span class="material-symbols-rounded">auto_awesome</span> 250 câu trắc nghiệm</div>
-        <h1>Ôn tập Sinh học A1</h1>
-        <p>Chọn chương bạn muốn luyện tập hoặc tham gia <b>Phòng học chung Live 5 người</b> để làm bài và trò chuyện cùng bạn bè.</p>
+      <!-- Danh mục môn học -->
+      <div class="subject-section">
+        <div class="section-title">
+          <span class="material-symbols-rounded">category</span>
+          <h3>Danh mục môn học:</h3>
+        </div>
+        <div class="subject-grid" id="subjectGrid"></div>
+      </div>
+
+      <div class="hero" id="subjectHero">
+        <div class="hero-chip" id="subjectHeroChip">
+          <span class="material-symbols-rounded">auto_awesome</span> <span id="subjectHeroChipText">250 câu trắc nghiệm</span>
+        </div>
+        <h1 id="subjectHeroTitle">Ôn tập Sinh học A1</h1>
+        <p id="subjectHeroDesc">Chọn chương bạn muốn luyện tập hoặc tham gia <b>Phòng học chung Live 10 người</b> để làm bài và trò chuyện cùng bạn bè.</p>
       </div>
 
       <!-- Live Co-op Room Card -->
@@ -68,7 +79,7 @@
 
       <div class="section-title">
         <span class="material-symbols-rounded">menu_book</span>
-        <h3>Hoặc chọn chương để bắt đầu:</h3>
+        <h3 id="chapterSectionTitle">Các chương của môn Sinh học A1:</h3>
       </div>
       <div class="chapter-grid" id="chapterGrid"></div>
 
@@ -280,6 +291,76 @@
       </div>
     </section>
   </main>
+
+  <!-- Modal Hướng dẫn thêm môn học mới -->
+  <div class="modal-overlay hidden" id="addSubjectModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3><span class="material-symbols-rounded">post_add</span> Hướng dẫn thêm môn học mới</h3>
+        <button class="icon-btn sm" id="closeAddSubjectModal" title="Đóng"><span class="material-symbols-rounded">close</span></button>
+      </div>
+      <div class="modal-body">
+        <p>Hệ thống hỗ trợ tạo không giới hạn các môn học khác (Hóa học, Toán, Lý, Pháp luật, Triết học...). Để thêm môn mới, bạn chỉ cần thực hiện 3 bước:</p>
+        <div class="modal-steps">
+          <div class="step-item">
+            <span class="step-num">1</span>
+            <div>
+              <b>Mở file <code>data.js</code></b>
+              <p>Mở file <code>data.js</code> trong thư mục dự án trên máy tính.</p>
+            </div>
+          </div>
+          <div class="step-item">
+            <span class="step-num">2</span>
+            <div>
+              <b>Dán đoạn code môn mới vào danh sách <code>window.SUBJECTS_DATA</code></b>
+              <p>Sao chép mẫu bên dưới, chỉnh sửa tên môn, các chương và câu hỏi theo ý bạn:</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="code-snippet">
+          <button class="copy-code-btn" id="copySubjectTemplateBtn">
+            <span class="material-symbols-rounded">content_copy</span> Sao chép mẫu
+          </button>
+          <pre><code id="subjectTemplateCode">{
+  id: "hoa_dc",
+  name: "Hóa học đại cương",
+  code: "HDC",
+  desc: "Đề cương ôn tập trắc nghiệm Hóa học đại cương",
+  icon: "science",
+  color: "#4285f4",
+  chapters: [
+    {
+      id: "ch1",
+      title: "Chương 1: Cấu tạo nguyên tử & Bảng tuần hoàn",
+      short: "Cấu tạo nguyên tử",
+      questions: [
+        {
+          n: 1,
+          q: "Hạt mang điện tích âm trong nguyên tử là:",
+          o: ["Proton", "Neutron", "Electron", "Positron"],
+          a: 2,
+          exp: "Electron mang điện tích âm (-1), proton mang điện dương (+1), neutron không mang điện."
+        }
+      ]
+    }
+  ]
+}</code></pre>
+        </div>
+
+        <div class="step-item">
+          <span class="step-num">3</span>
+          <div>
+            <b>Lưu file và nhấp đúp <code>day-len-github.bat</code></b>
+            <p>Render sẽ tự động cập nhật môn học mới lên web của bạn chỉ sau 1 phút!</p>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end;">
+        <button class="btn primary" id="gotItBtn">Đã hiểu</button>
+      </div>
+    </div>
+  </div>
 
   <div class="toast" id="toast"></div>
 

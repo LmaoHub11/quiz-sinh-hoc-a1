@@ -1,6 +1,20 @@
-// Dữ liệu câu hỏi trích từ đề cương ôn tập Sinh học A1 (ĐH Cần Thơ)
-// a = chỉ số đáp án đúng (0=A, 1=B, 2=C, 3=D), exp = Giải thích chi tiết tại sao đúng / sai
-window.QUIZ_DATA = [
+// ============================================================================
+// HỆ THỐNG DỮ LIỆU ĐA MÔN HỌC / ĐA CHỦ ĐỀ (MULTI-COURSE / MULTI-SUBJECT)
+// Mỗi Môn học/Chủ đề (Subject / Course) có cấu trúc chuẩn:
+// - id: string (ví dụ: "sinh-hoc-a1", "hoa-phan-tich")
+// - title: string (ví dụ: "Sinh học A1", "Hóa phân tích đại cương")
+// - description: string
+// - icon: string (Tên icon Material Symbols, ví dụ: "biotech", "science", "calculate"...)
+// - chapters: danh sách các chương, mỗi chương chứa mảng câu hỏi questions
+// ============================================================================
+window.COURSES_DATA = [
+  {
+    id: "sinh-hoc-a1",
+    title: "Sinh học A1",
+    description: "Đề cương ôn tập trắc nghiệm giữa kỳ – Đại học Cần Thơ (250 câu hỏi & giải thích chi tiết)",
+    icon: "biotech",
+    color: "#34a853",
+    chapters: [
  {
   "id": "c1",
   "title": "Đại cương về tế bào & Đại phân tử",
@@ -3029,4 +3043,116 @@ window.QUIZ_DATA = [
    }
   ]
  }
+    ]
+  },
+  {
+    id: "hoa-phan-tich",
+    title: "Hóa phân tích đại cương",
+    description: "Môn học mẫu: Đề cương Hóa phân tích, phương pháp chuẩn độ & kỹ thuật phòng thí nghiệm",
+    icon: "science",
+    color: "#4285f4",
+    chapters: [
+      {
+        id: "hpt_c1",
+        title: "Chương 1: Đại cương về Hóa phân tích & Nồng độ dung dịch",
+        short: "Nồng độ dung dịch",
+        questions: [
+          {
+            n: 1,
+            q: "Dung dịch chuẩn (standard solution) trong phương pháp chuẩn độ là dung dịch:",
+            o: [
+              "Đã biết chính xác nồng độ để dùng xác định nồng độ dung dịch khác.",
+              "Chưa biết nồng độ, đang cần đem đi chuẩn độ để xác định.",
+              "Chỉ chứa chất chỉ thị màu pH dùng để nhận biết điểm tương đương.",
+              "Dung dịch đệm dùng để ổn định độ dẫn điện của môi trường phản ứng."
+            ],
+            a: 0,
+            exp: "Dung dịch chuẩn là dung dịch đã biết trước nồng độ với độ chính xác cao, dùng làm thước đo chuẩn để xác định nồng độ của dung dịch chất cần phân tích."
+          },
+          {
+            n: 2,
+            q: "Chất chỉ thị Phenolphthalein chuyển sang màu hồng đậm trong môi trường có pH:",
+            o: [
+              "pH < 7 (Môi trường acid)",
+              "pH = 7 (Môi trường trung tính)",
+              "pH > 8.3 (Môi trường kiềm / bazo)",
+              "Mọi thang đo pH đều có màu hồng"
+            ],
+            a: 2,
+            exp: "Khoảng chuyển màu của Phenolphthalein là 8.2 - 10.0. Dưới 8.2 không màu, trên 8.3 bắt đầu chuyển sang màu hồng và chuyển màu hồng đậm trong môi trường kiềm."
+          },
+          {
+            n: 3,
+            q: "Sai số hệ thống (Systematic error) trong phép đo phân tích có đặc điểm nào sau đây?",
+            o: [
+              "Do nguyên nhân ngẫu nhiên, không thể đoán trước và không sửa chữa được.",
+              "Có thể xác định nguyên nhân, có tính quy luật lặp lại và có thể hiệu chỉnh được.",
+              "Chỉ xuất hiện khi người làm thí nghiệm lỡ tay làm đổ hóa chất.",
+              "Luôn tự động triệt tiêu về 0 nếu thực hiện phép đo 3 lần trở lên."
+            ],
+            a: 1,
+            exp: "Sai số hệ thống do dụng cụ (cân, pipet chưa chuẩn), hóa chất không tinh khiết hoặc phương pháp sai; mang tính quy luật xác định và hoàn toàn có thể loại trừ hoặc hiệu chỉnh."
+          },
+          {
+            n: 4,
+            q: "Điểm tương đương (Equivalence point) trong chuẩn độ acid - base là thời điểm:",
+            o: [
+              "Chất chỉ thị bắt đầu đổi màu trong dung dịch.",
+              "Lượng chất chuẩn thêm vào vừa đủ phản ứng hết với lượng chất cần phân tích theo đúng phương trình phản ứng.",
+              "Khi buret chảy hết toàn bộ thể tích dung dịch.",
+              "Khi nhiệt độ dung dịch đạt 100°C."
+            ],
+            a: 1,
+            exp: "Điểm tương đương là thời điểm lý thuyết khi số đương lượng gam của chất chuẩn vừa đủ phản ứng hoàn toàn với số đương lượng gam của chất cần phân tích."
+          },
+          {
+            n: 5,
+            q: "Dụng cụ nào sau đây cho độ chính xác cao nhất khi cần lấy chính xác 10.00 mL dung dịch?",
+            o: [
+              "Ống đong (Graduated cylinder) 50 mL",
+              "Cốc đốt (Beaker) 100 mL",
+              "Pipet bầu (Volumetric pipette) 10 mL",
+              "Bình tam giác (Erlenmeyer flask) 250 mL"
+            ],
+            a: 2,
+            exp: "Pipet bầu (volumetric pipette) là dụng cụ đo thể tích có độ chính xác cao nhất trong phòng thí nghiệm hóa phân tích (sai số thông thường chỉ khoảng ±0.02 mL)."
+          }
+        ]
+      }
+    ]
+  }
+
+  // ============================================================================
+  // HƯỚNG DẪN THÊM MÔN HỌC MỚI (SUBJECT / COURSE MỚI):
+  // Bạn chỉ cần copy khối dưới đây, đổi id, title, description, icon và danh sách câu hỏi:
+  // ============================================================================
+  /*
+  , {
+    id: "toan-cao-cap",
+    title: "Toán cao cấp A1",
+    description: "Đề cương ôn tập Giải tích & Đại số tuyến tính",
+    icon: "calculate",
+    color: "#ea4335",
+    chapters: [
+      {
+        id: "toan_c1",
+        title: "Chương 1: Ma trận & Định thức",
+        short: "Ma trận",
+        questions: [
+          {
+            n: 1,
+            q: "Định thức của ma trận đơn vị cấp 3 có giá trị là:",
+            o: ["0", "1", "3", "-1"],
+            a: 1,
+            exp: "Định thức của ma trận đơn vị bất kỳ luôn bằng 1."
+          }
+        ]
+      }
+    ]
+  }
+  */
 ];
+
+// Đồng bộ tên gọi và giữ tương thích ngược với toàn bộ code cũ:
+window.SUBJECTS_DATA = window.COURSES_DATA;
+window.QUIZ_DATA = window.COURSES_DATA[0].chapters;

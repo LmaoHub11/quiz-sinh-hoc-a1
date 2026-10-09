@@ -124,6 +124,7 @@
   // --- App State ---
   const State = {
     currentView: 'home', // 'home' | 'quiz' | 'result'
+    currentSubjectId: localStorage.getItem('sh_current_subject') || 'sinh-hoc-a1',
     activeChapterId: null,
     chapterTitle: '',
     questions: [], // Question instances with state
@@ -135,14 +136,14 @@
     shuffleA: false,
     theme: localStorage.getItem('sh_theme') || 'dark',
 
-    // Live Co-op State (Phòng 5 người)
+    // Live Co-op State (Phòng 10 người)
     liveMode: false,
     roomId: null,
     userName: localStorage.getItem('sh_username') || '',
     currentUser: null,
     members: [],
 
-    // Best scores map: chapterId -> { score, total, pct }
+    // Best scores map: key -> { score, total, pct }
     highScores: JSON.parse(localStorage.getItem('sh_highscores') || '{}')
   };
 
@@ -366,6 +367,10 @@
         }
 
         case 'quiz_started': {
+          if (msg.quizState && msg.quizState.subjectId) {
+            State.currentSubjectId = msg.quizState.subjectId;
+            localStorage.setItem('sh_current_subject', msg.quizState.subjectId);
+          }
           State.questions = msg.quizState.questions;
           State.currentIndex = msg.quizState.currentIndex || 0;
           State.userAnswers = msg.quizState.userAnswers || {};
@@ -650,34 +655,102 @@
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
 
+    getCurrentCourse() {
+      const courses = window.COURSES_DATA || window.SUBJECTS_DATA || [];
+      return courses.find(c => c.id === State.currentSubjectId) || courses[0] || null;
+    },
+
     // --- Home View & Chapter selection ---
     renderHome() {
-      const grid = document.getElementById('chapterGrid');
-      if (!grid || !window.QUIZ_DATA) return;
+      const subjectGrid = document.getElementById('subjectGrid');
+      const chapterGrid = document.getElementById('chapterGrid');
+      const courses = window.COURSES_DATA || window.SUBJECTS_DATA || [];
+      const current = this.getCurrentCourse();
 
-      const allCount = window.QUIZ_DATA.reduce((sum, c) => sum + c.questions.length, 0);
+      if (!current) return;
 
+      // 1. Render Subject Selector Cards
+      if (subjectGrid && courses.length > 0) {
+        let sHtml = '';
+        courses.forEach(c => {
+          const isActive = c.id === current.id;
+          const totalQ = c.chapters.reduce((sum, ch) => sum + ch.questions.length, 0);
+          sHtml += `
+            <div class="subject-card ${isActive ? 'active' : ''}" data-subject-id="${c.id}">
+              <div class="subject-card-head">
+                <div class="subject-icon-box" style="color: ${c.color || 'var(--primary)'}">
+                  <span class="material-symbols-rounded">${c.icon || 'school'}</span>
+                </div>
+                <span class="subject-badge ${isActive ? 'active-indicator' : ''}">
+                  ${isActive ? '✓ Đang học' : 'Môn học'}
+                </span>
+              </div>
+              <div class="subject-card-name">${c.title}</div>
+              <div class="subject-card-desc">${c.description || ''}</div>
+              <div class="subject-card-meta">
+                <div class="subject-card-stats">
+                  <span class="material-symbols-rounded" style="font-size:16px;">library_books</span>
+                  <span>${c.chapters.length} chương</span>
+                </div>
+                <div class="subject-card-stats">
+                  <span class="material-symbols-rounded" style="font-size:16px;">quiz</span>
+                  <span>${totalQ} câu</span>
+                </div>
+              </div>
+            </div>
+          `;
+        });
+
+        // Thẻ "+ Thêm môn học khác"
+        sHtml += `
+          <div class="subject-card add-card" id="openAddSubjectBtn" title="Xem hướng dẫn thêm môn học mới">
+            <span class="material-symbols-rounded">add_circle</span>
+            <b>+ Thêm môn học khác</b>
+            <span>Tạo thêm đề thi môn mới dễ dàng</span>
+          </div>
+        `;
+        subjectGrid.innerHTML = sHtml;
+      }
+
+      // 2. Update Hero & Titles
+      const totalQ = current.chapters.reduce((sum, ch) => sum + ch.questions.length, 0);
+      const heroChipText = document.getElementById('subjectHeroChipText');
+      const heroTitle = document.getElementById('subjectHeroTitle');
+      const heroDesc = document.getElementById('subjectHeroDesc');
+      const chSectionTitle = document.getElementById('chapterSectionTitle');
+      const topbarBrandSub = document.getElementById('topbarBrandSub');
+
+      if (heroChipText) heroChipText.textContent = `${totalQ} câu trắc nghiệm · ${current.chapters.length} chương`;
+      if (heroTitle) heroTitle.textContent = `Ôn tập ${current.title}`;
+      if (heroDesc) heroDesc.innerHTML = `Chọn chương của <b>${current.title}</b> để luyện tập hoặc tham gia <b>Phòng học Live 10 người</b> để học cùng bạn bè.`;
+      if (chSectionTitle) chSectionTitle.textContent = `Các chương của môn ${current.title}:`;
+      if (topbarBrandSub) topbarBrandSub.textContent = `Môn hiện tại: ${current.title}`;
+
+      // 3. Render Chapters of current subject
+      if (!chapterGrid) return;
       let html = '';
 
       // Card for "Tất cả các chương"
-      const allBest = State.highScores['all'];
+      const allScoreKey = `${current.id}_all`;
+      const allBest = State.highScores[allScoreKey] || State.highScores['all'];
       html += `
         <button class="chapter all" data-id="all">
           <div class="ch-icon"><span class="material-symbols-rounded">stars</span></div>
-          <h4>Tất cả câu hỏi (Tổng hợp)</h4>
+          <h4>Tất cả câu hỏi (${current.title})</h4>
           <div class="ch-meta">
-            <span>Toàn bộ ${allCount} câu</span>
+            <span>Toàn bộ ${totalQ} câu</span>
             ${allBest ? `<span class="ch-best">Điểm cao: ${allBest.score}/${allBest.total} (${allBest.pct}%)</span>` : ''}
           </div>
         </button>
       `;
 
       // Cards for each chapter
-      window.QUIZ_DATA.forEach(ch => {
-        const best = State.highScores[ch.id];
+      current.chapters.forEach(ch => {
+        const scoreKey = `${current.id}_${ch.id}`;
+        const best = State.highScores[scoreKey] || State.highScores[ch.id];
         html += `
           <button class="chapter" data-id="${ch.id}">
-            <div class="ch-icon"><span class="material-symbols-rounded">science</span></div>
+            <div class="ch-icon"><span class="material-symbols-rounded">${current.icon || 'science'}</span></div>
             <h4>${ch.title}</h4>
             <div class="ch-meta">
               <span>${ch.questions.length} câu hỏi</span>
@@ -687,10 +760,13 @@
         `;
       });
 
-      grid.innerHTML = html;
+      chapterGrid.innerHTML = html;
     },
 
     startQuiz(chapterId, customQuestions = null, customTitle = null) {
+      const current = this.getCurrentCourse();
+      if (!current) return;
+
       State.activeChapterId = chapterId;
       State.userAnswers = {};
       State.currentIndex = 0;
@@ -702,17 +778,17 @@
         rawList = customQuestions;
         title = customTitle || 'Luyện tập câu sai';
       } else if (chapterId === 'all') {
-        title = 'Tổng hợp tất cả các chương';
-        window.QUIZ_DATA.forEach(c => {
+        title = `Tổng hợp tất cả – ${current.title}`;
+        current.chapters.forEach(c => {
           c.questions.forEach(q => {
-            rawList.push({ ...q, _chTitle: c.short });
+            rawList.push({ ...q, _chTitle: c.short || c.title });
           });
         });
       } else {
-        const found = window.QUIZ_DATA.find(c => c.id === chapterId);
+        const found = current.chapters.find(c => c.id === chapterId);
         if (!found) return;
-        title = found.title;
-        rawList = found.questions.map(q => ({ ...q, _chTitle: found.short }));
+        title = `${current.title}: ${found.title}`;
+        rawList = found.questions.map(q => ({ ...q, _chTitle: found.short || found.title }));
       }
 
       State.chapterTitle = title;
@@ -734,6 +810,8 @@
       if (State.liveMode) {
         LiveRoom.send({
           type: 'sync_start_quiz',
+          subjectId: current.id,
+          subjectTitle: current.title,
           chapterId: State.activeChapterId,
           chapterTitle: title,
           questions: prepared
@@ -1057,9 +1135,11 @@
 
       // Save high score
       if (State.activeChapterId) {
-        const prev = State.highScores[State.activeChapterId];
+        const current = this.getCurrentCourse();
+        const scoreKey = current ? `${current.id}_${State.activeChapterId}` : State.activeChapterId;
+        const prev = State.highScores[scoreKey];
         if (!prev || pct > prev.pct) {
-          State.highScores[State.activeChapterId] = { score: good, total, pct };
+          State.highScores[scoreKey] = { score: good, total, pct };
           localStorage.setItem('sh_highscores', JSON.stringify(State.highScores));
           this.renderHome();
         }
@@ -1276,6 +1356,67 @@
           this.switchView('home');
         }
       });
+
+      // Subject Selection Delegation
+      const subjectGrid = document.getElementById('subjectGrid');
+      if (subjectGrid) {
+        subjectGrid.addEventListener('click', (e) => {
+          const addBtn = e.target.closest('#openAddSubjectBtn');
+          if (addBtn) {
+            const modal = document.getElementById('addSubjectModal');
+            if (modal) modal.classList.remove('hidden');
+            return;
+          }
+          const card = e.target.closest('.subject-card[data-subject-id]');
+          if (!card) return;
+          const sId = card.dataset.subjectId;
+          if (sId && sId !== State.currentSubjectId) {
+            State.currentSubjectId = sId;
+            localStorage.setItem('sh_current_subject', sId);
+            this.renderHome();
+            const course = this.getCurrentCourse();
+            showToast(`Đã chuyển sang môn: ${course ? course.title : sId}!`);
+            Sound.shuffle();
+
+            // Gợi ý mã phòng mặc định cho môn này
+            const roomInput = document.getElementById('roomIdInput');
+            if (roomInput && course) {
+              const suggestedCode = (course.code || course.id).replace(/[^a-zA-Z0-9]/g, '').toUpperCase().substring(0, 8);
+              roomInput.value = suggestedCode || 'ROOM';
+            }
+          }
+        });
+      }
+
+      // Add Subject Modal events
+      const addModal = document.getElementById('addSubjectModal');
+      const closeAddModal = document.getElementById('closeAddSubjectModal');
+      const gotItBtn = document.getElementById('gotItBtn');
+      const copyTplBtn = document.getElementById('copySubjectTemplateBtn');
+
+      if (closeAddModal && addModal) {
+        closeAddModal.addEventListener('click', () => addModal.classList.add('hidden'));
+      }
+      if (gotItBtn && addModal) {
+        gotItBtn.addEventListener('click', () => addModal.classList.add('hidden'));
+      }
+      if (addModal) {
+        addModal.addEventListener('click', (e) => {
+          if (e.target === addModal) addModal.classList.add('hidden');
+        });
+      }
+      if (copyTplBtn) {
+        copyTplBtn.addEventListener('click', () => {
+          const codeEl = document.getElementById('subjectTemplateCode');
+          if (codeEl && navigator.clipboard) {
+            navigator.clipboard.writeText(codeEl.textContent).then(() => {
+              showToast('Đã sao chép cấu trúc môn mẫu vào Clipboard!');
+            }).catch(() => {
+              prompt('Sao chép cấu trúc dưới đây:', codeEl.textContent);
+            });
+          }
+        });
+      }
 
       // Chapter grid delegation
       document.getElementById('chapterGrid').addEventListener('click', (e) => {
