@@ -573,6 +573,46 @@ kbd { font-family: inherit; font-size: 11px; padding: 1px 6px; border: 1px solid
 }
 .toast.show { transform: translate(-50%, 0); opacity: 1; }
 
+/* Placeholder khi chưa chọn môn */
+.empty-subject-state {
+  text-align: center;
+  padding: 48px 24px;
+  background: var(--surface);
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  margin-top: 20px;
+  animation: fade .3s ease;
+}
+.empty-subject-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--primary) 12%, var(--surface-2));
+  color: var(--primary);
+  display: grid;
+  place-items: center;
+  margin: 0 auto 16px;
+}
+.empty-subject-icon .material-symbols-rounded {
+  font-size: 30px;
+}
+.empty-subject-state h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.empty-subject-state p {
+  font-size: 14px;
+  color: var(--text-2);
+  max-width: 540px;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+.subject-content-wrap {
+  animation: fade .35s ease;
+}
+
 /* ====== Subjects Section ====== */
 .subject-section { margin-bottom: 24px; }
 .subject-grid {

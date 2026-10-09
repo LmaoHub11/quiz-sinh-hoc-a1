@@ -124,7 +124,7 @@
   // --- App State ---
   const State = {
     currentView: 'home', // 'home' | 'quiz' | 'result'
-    currentSubjectId: localStorage.getItem('sh_current_subject') || 'sinh-hoc-a1',
+    currentSubjectId: null, // Ban đầu khi mở trang web thì user chưa chọn môn nào
     activeChapterId: null,
     chapterTitle: '',
     questions: [], // Question instances with state
@@ -656,24 +656,22 @@
     },
 
     getCurrentCourse() {
+      if (!State.currentSubjectId) return null;
       const courses = window.COURSES_DATA || window.SUBJECTS_DATA || [];
-      return courses.find(c => c.id === State.currentSubjectId) || courses[0] || null;
+      return courses.find(c => c.id === State.currentSubjectId) || null;
     },
 
     // --- Home View & Chapter selection ---
     renderHome() {
       const subjectGrid = document.getElementById('subjectGrid');
-      const chapterGrid = document.getElementById('chapterGrid');
       const courses = window.COURSES_DATA || window.SUBJECTS_DATA || [];
       const current = this.getCurrentCourse();
-
-      if (!current) return;
 
       // 1. Render Subject Selector Cards
       if (subjectGrid && courses.length > 0) {
         let sHtml = '';
         courses.forEach(c => {
-          const isActive = c.id === current.id;
+          const isActive = current && c.id === current.id;
           const totalQ = c.chapters.reduce((sum, ch) => sum + ch.questions.length, 0);
           sHtml += `
             <div class="subject-card ${isActive ? 'active' : ''}" data-subject-id="${c.id}">
@@ -682,7 +680,7 @@
                   <span class="material-symbols-rounded">${c.icon || 'school'}</span>
                 </div>
                 <span class="subject-badge ${isActive ? 'active-indicator' : ''}">
-                  ${isActive ? '✓ Đang học' : 'Môn học'}
+                  ${isActive ? '✓ Đang chọn' : 'Nhấp để chọn'}
                 </span>
               </div>
               <div class="subject-card-name">${c.title}</div>
@@ -712,13 +710,28 @@
         subjectGrid.innerHTML = sHtml;
       }
 
+      const emptyPrompt = document.getElementById('emptySubjectPrompt');
+      const contentWrap = document.getElementById('subjectContentWrap');
+      const topbarBrandSub = document.getElementById('topbarBrandSub');
+
+      if (!current) {
+        // CHƯA CHỌN MÔN: Ẩn phần chi tiết bên dưới, hiện ô hướng dẫn
+        if (emptyPrompt) emptyPrompt.classList.remove('hidden');
+        if (contentWrap) contentWrap.classList.add('hidden');
+        if (topbarBrandSub) topbarBrandSub.textContent = 'Chọn môn học để bắt đầu';
+        return;
+      }
+
+      // ĐÃ CHỌN MÔN: Hiện phần chi tiết bên dưới
+      if (emptyPrompt) emptyPrompt.classList.add('hidden');
+      if (contentWrap) contentWrap.classList.remove('hidden');
+
       // 2. Update Hero & Titles
       const totalQ = current.chapters.reduce((sum, ch) => sum + ch.questions.length, 0);
       const heroChipText = document.getElementById('subjectHeroChipText');
       const heroTitle = document.getElementById('subjectHeroTitle');
       const heroDesc = document.getElementById('subjectHeroDesc');
       const chSectionTitle = document.getElementById('chapterSectionTitle');
-      const topbarBrandSub = document.getElementById('topbarBrandSub');
 
       if (heroChipText) heroChipText.textContent = `${totalQ} câu trắc nghiệm · ${current.chapters.length} chương`;
       if (heroTitle) heroTitle.textContent = `Ôn tập ${current.title}`;
@@ -727,6 +740,7 @@
       if (topbarBrandSub) topbarBrandSub.textContent = `Môn hiện tại: ${current.title}`;
 
       // 3. Render Chapters of current subject
+      const chapterGrid = document.getElementById('chapterGrid');
       if (!chapterGrid) return;
       let html = '';
 
@@ -1303,7 +1317,7 @@
       const info = document.getElementById('resumeInfo');
       if (!card || !info) return;
 
-      if (!raw || State.liveMode) {
+      if (!raw || State.liveMode || !State.currentSubjectId) {
         card.classList.add('hidden');
         return;
       }
@@ -1372,10 +1386,10 @@
           const sId = card.dataset.subjectId;
           if (sId && sId !== State.currentSubjectId) {
             State.currentSubjectId = sId;
-            localStorage.setItem('sh_current_subject', sId);
             this.renderHome();
+            this.checkResumeState();
             const course = this.getCurrentCourse();
-            showToast(`Đã chuyển sang môn: ${course ? course.title : sId}!`);
+            showToast(`Đã chọn môn: ${course ? course.title : sId}!`);
             Sound.shuffle();
 
             // Gợi ý mã phòng mặc định cho môn này
@@ -1384,6 +1398,14 @@
               const suggestedCode = (course.code || course.id).replace(/[^a-zA-Z0-9]/g, '').toUpperCase().substring(0, 8);
               roomInput.value = suggestedCode || 'ROOM';
             }
+
+            // Cuộn mượt xuống khối chi tiết vừa hiển thị
+            setTimeout(() => {
+              const contentWrap = document.getElementById('subjectContentWrap');
+              if (contentWrap) {
+                contentWrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }
+            }, 80);
           }
         });
       }

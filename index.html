@@ -40,87 +40,99 @@
         <div class="subject-grid" id="subjectGrid"></div>
       </div>
 
-      <div class="hero" id="subjectHero">
-        <div class="hero-chip" id="subjectHeroChip">
-          <span class="material-symbols-rounded">auto_awesome</span> <span id="subjectHeroChipText">250 câu trắc nghiệm</span>
+      <!-- Placeholder khi chưa chọn môn nào -->
+      <div class="empty-subject-state" id="emptySubjectPrompt">
+        <div class="empty-subject-icon">
+          <span class="material-symbols-rounded">touch_app</span>
         </div>
-        <h1 id="subjectHeroTitle">Ôn tập Sinh học A1</h1>
-        <p id="subjectHeroDesc">Chọn chương bạn muốn luyện tập hoặc tham gia <b>Phòng học chung Live 10 người</b> để làm bài và trò chuyện cùng bạn bè.</p>
+        <h3>Vui lòng chọn một môn học ở trên để bắt đầu</h3>
+        <p>Nhấp vào một trong các môn học phía trên (ví dụ: <b>Sinh học A1</b> hoặc <b>Hóa phân tích</b>) để hiển thị danh sách các chương, làm bài trắc nghiệm và vào phòng học nhóm Live.</p>
       </div>
 
-      <!-- Live Co-op Room Card -->
-      <div class="live-card">
-        <div class="live-card-top">
-          <div class="live-badge">
-            <span class="live-pulse"></span>
-            <span class="material-symbols-rounded">groups</span>
-            <span>PHÒNG HỌC LIVE 10 NGƯỜI</span>
+      <!-- Khối chi tiết môn học (Ẩn mặc định khi chưa chọn môn, hiện khi user nhấp chọn môn) -->
+      <div class="subject-content-wrap hidden" id="subjectContentWrap">
+        <div class="hero" id="subjectHero">
+          <div class="hero-chip" id="subjectHeroChip">
+            <span class="material-symbols-rounded">auto_awesome</span> <span id="subjectHeroChipText">250 câu trắc nghiệm</span>
           </div>
-          <span class="live-hint-text">Đồng bộ 0-latency · Giữ chỗ 90s khi out</span>
+          <h1 id="subjectHeroTitle">Ôn tập môn học</h1>
+          <p id="subjectHeroDesc">Chọn chương bạn muốn luyện tập hoặc tham gia <b>Phòng học chung Live 10 người</b> để làm bài và trò chuyện cùng bạn bè.</p>
         </div>
-        <p class="live-desc">Cùng nhau làm bài trực tiếp tối đa 10 bạn. Một người chọn đáp án, các máy khác sẽ chọn theo ngay; nếu chuyển tab hoặc khóa màn hình, hệ thống sẽ <b>giữ chỗ 90s</b> và tự động kết nối lại khi bạn quay lại!</p>
-        <div class="live-form">
-          <div class="live-field">
-            <label for="userNameInput">Tên của bạn:</label>
-            <input type="text" id="userNameInput" placeholder="Ví dụ: Minh, Lan, Huy..." maxlength="20" />
+
+        <!-- Live Co-op Room Card -->
+        <div class="live-card">
+          <div class="live-card-top">
+            <div class="live-badge">
+              <span class="live-pulse"></span>
+              <span class="material-symbols-rounded">groups</span>
+              <span>PHÒNG HỌC LIVE 10 NGƯỜI</span>
+            </div>
+            <span class="live-hint-text">Đồng bộ 0-latency · Giữ chỗ 90s khi out</span>
           </div>
-          <div class="live-field">
-            <label for="roomIdInput">Mã phòng (tối đa 10 bạn):</label>
-            <input type="text" id="roomIdInput" value="SHDC" maxlength="10" placeholder="Mã phòng..." />
+          <p class="live-desc">Cùng nhau làm bài trực tiếp tối đa 10 bạn. Một người chọn đáp án, các máy khác sẽ chọn theo ngay; nếu chuyển tab hoặc khóa màn hình, hệ thống sẽ <b>giữ chỗ 90s</b> và tự động kết nối lại khi bạn quay lại!</p>
+          <div class="live-form">
+            <div class="live-field">
+              <label for="userNameInput">Tên của bạn:</label>
+              <input type="text" id="userNameInput" placeholder="Ví dụ: Minh, Lan, Huy..." maxlength="20" />
+            </div>
+            <div class="live-field">
+              <label for="roomIdInput">Mã phòng (tối đa 10 bạn):</label>
+              <input type="text" id="roomIdInput" value="SHDC" maxlength="10" placeholder="Mã phòng..." />
+            </div>
+            <button class="btn primary" id="joinRoomBtn">
+              <span class="material-symbols-rounded">sensors</span> Vào phòng Live ngay
+            </button>
+            <button class="btn ghost" id="shareRoomBtn" title="Sao chép link web online gửi bạn bè">
+              <span class="material-symbols-rounded">share</span> Chia sẻ link
+            </button>
           </div>
-          <button class="btn primary" id="joinRoomBtn">
-            <span class="material-symbols-rounded">sensors</span> Vào phòng Live ngay
-          </button>
-          <button class="btn ghost" id="shareRoomBtn" title="Sao chép link web online gửi bạn bè">
-            <span class="material-symbols-rounded">share</span> Chia sẻ link
-          </button>
         </div>
-      </div>
 
-      <div class="section-title">
-        <span class="material-symbols-rounded">menu_book</span>
-        <h3 id="chapterSectionTitle">Các chương của môn Sinh học A1:</h3>
-      </div>
-      <div class="chapter-grid" id="chapterGrid"></div>
+        <div class="section-title">
+          <span class="material-symbols-rounded">menu_book</span>
+          <h3 id="chapterSectionTitle">Các chương của môn:</h3>
+        </div>
+        <div class="chapter-grid" id="chapterGrid"></div>
 
-      <div class="settings-card">
-        <h3><span class="material-symbols-rounded">tune</span> Tùy chọn</h3>
-        <div class="setting-row">
+        <div class="settings-card">
+          <h3><span class="material-symbols-rounded">tune</span> Tùy chọn</h3>
+          <div class="setting-row">
+            <div>
+              <div class="setting-title">Xáo trộn thứ tự câu hỏi</div>
+              <div class="setting-sub">Các câu hỏi sẽ xuất hiện theo thứ tự ngẫu nhiên</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="optShuffleQ" checked /><span></span></label>
+          </div>
+          <div class="setting-row">
+            <div>
+              <div class="setting-title">Xáo trộn đáp án A/B/C/D</div>
+              <div class="setting-sub">Vị trí các đáp án được đảo ngẫu nhiên</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="optShuffleA" /><span></span></label>
+          </div>
+          <div class="setting-row">
+            <div>
+              <div class="setting-title">Số câu mỗi lượt</div>
+              <div class="setting-sub">Giới hạn số câu để luyện nhanh</div>
+            </div>
+            <div class="segmented" id="optCount">
+              <button data-v="10">10</button>
+              <button data-v="20">20</button>
+              <button data-v="40">40</button>
+              <button data-v="0" class="on">Tất cả</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="resume-card hidden" id="resumeCard">
           <div>
-            <div class="setting-title">Xáo trộn thứ tự câu hỏi</div>
-            <div class="setting-sub">Các câu hỏi sẽ xuất hiện theo thứ tự ngẫu nhiên</div>
+            <div class="setting-title">Bạn đang làm dở một bài</div>
+            <div class="setting-sub" id="resumeInfo"></div>
           </div>
-          <label class="switch"><input type="checkbox" id="optShuffleQ" checked /><span></span></label>
-        </div>
-        <div class="setting-row">
-          <div>
-            <div class="setting-title">Xáo trộn đáp án A/B/C/D</div>
-            <div class="setting-sub">Vị trí các đáp án được đảo ngẫu nhiên</div>
+          <div class="resume-actions">
+            <button class="btn ghost" id="discardBtn">Bỏ qua</button>
+            <button class="btn primary" id="resumeBtn"><span class="material-symbols-rounded">play_arrow</span> Tiếp tục</button>
           </div>
-          <label class="switch"><input type="checkbox" id="optShuffleA" /><span></span></label>
-        </div>
-        <div class="setting-row">
-          <div>
-            <div class="setting-title">Số câu mỗi lượt</div>
-            <div class="setting-sub">Giới hạn số câu để luyện nhanh</div>
-          </div>
-          <div class="segmented" id="optCount">
-            <button data-v="10">10</button>
-            <button data-v="20">20</button>
-            <button data-v="40">40</button>
-            <button data-v="0" class="on">Tất cả</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="resume-card hidden" id="resumeCard">
-        <div>
-          <div class="setting-title">Bạn đang làm dở một bài</div>
-          <div class="setting-sub" id="resumeInfo"></div>
-        </div>
-        <div class="resume-actions">
-          <button class="btn ghost" id="discardBtn">Bỏ qua</button>
-          <button class="btn primary" id="resumeBtn"><span class="material-symbols-rounded">play_arrow</span> Tiếp tục</button>
         </div>
       </div>
     </section>
