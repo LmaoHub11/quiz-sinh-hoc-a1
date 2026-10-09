@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quiz Sinh học A1 – Ôn tập giữa kỳ</title>
+  <meta name="description" content="Bài kiểm tra trắc nghiệm Sinh học A1 – 250 câu hỏi ôn tập giữa học kỳ, phong cách NotebookLM." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0..1,0" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- ========== HEADER ========== -->
+  <header class="topbar">
+    <button class="brand" id="homeBtn" title="Về trang chủ">
+      <span class="brand-logo"><span class="material-symbols-rounded">quiz</span></span>
+      <span class="brand-text">
+        <strong>Quiz Sinh học A1</strong>
+        <small>Đề cương ôn tập giữa kỳ</small>
+      </span>
+    </button>
+    <div class="topbar-actions">
+      <button class="icon-btn" id="themeBtn" title="Đổi giao diện sáng/tối">
+        <span class="material-symbols-rounded">dark_mode</span>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <!-- ========== HOME ========== -->
+    <section id="homeView" class="view active">
+      <div class="hero">
+        <div class="hero-chip"><span class="material-symbols-rounded">auto_awesome</span> 250 câu trắc nghiệm</div>
+        <h1>Ôn tập Sinh học A1</h1>
+        <p>Chọn chương bạn muốn luyện tập hoặc tham gia <b>Phòng học chung Live 5 người</b> để làm bài và trò chuyện cùng bạn bè.</p>
+      </div>
+
+      <!-- Live Co-op Room Card -->
+      <div class="live-card">
+        <div class="live-card-top">
+          <div class="live-badge">
+            <span class="live-pulse"></span>
+            <span class="material-symbols-rounded">groups</span>
+            <span>PHÒNG HỌC LIVE 10 NGƯỜI</span>
+          </div>
+          <span class="live-hint-text">Đồng bộ 0-latency · Giữ chỗ 90s khi out</span>
+        </div>
+        <p class="live-desc">Cùng nhau làm bài trực tiếp tối đa 10 bạn. Một người chọn đáp án, các máy khác sẽ chọn theo ngay; nếu chuyển tab hoặc khóa màn hình, hệ thống sẽ <b>giữ chỗ 90s</b> và tự động kết nối lại khi bạn quay lại!</p>
+        <div class="live-form">
+          <div class="live-field">
+            <label for="userNameInput">Tên của bạn:</label>
+            <input type="text" id="userNameInput" placeholder="Ví dụ: Minh, Lan, Huy..." maxlength="20" />
+          </div>
+          <div class="live-field">
+            <label for="roomIdInput">Mã phòng (tối đa 10 bạn):</label>
+            <input type="text" id="roomIdInput" value="SHDC" maxlength="10" placeholder="Mã phòng..." />
+          </div>
+          <button class="btn primary" id="joinRoomBtn">
+            <span class="material-symbols-rounded">sensors</span> Vào phòng Live ngay
+          </button>
+          <button class="btn ghost" id="shareRoomBtn" title="Sao chép link web online gửi bạn bè">
+            <span class="material-symbols-rounded">share</span> Chia sẻ link
+          </button>
+        </div>
+      </div>
+
+      <div class="section-title">
+        <span class="material-symbols-rounded">menu_book</span>
+        <h3>Hoặc chọn chương để bắt đầu:</h3>
+      </div>
+      <div class="chapter-grid" id="chapterGrid"></div>
+
+      <div class="settings-card">
+        <h3><span class="material-symbols-rounded">tune</span> Tùy chọn</h3>
+        <div class="setting-row">
+          <div>
+            <div class="setting-title">Xáo trộn thứ tự câu hỏi</div>
+            <div class="setting-sub">Các câu hỏi sẽ xuất hiện theo thứ tự ngẫu nhiên</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="optShuffleQ" checked /><span></span></label>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-title">Xáo trộn đáp án A/B/C/D</div>
+            <div class="setting-sub">Vị trí các đáp án được đảo ngẫu nhiên</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="optShuffleA" /><span></span></label>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-title">Số câu mỗi lượt</div>
+            <div class="setting-sub">Giới hạn số câu để luyện nhanh</div>
+          </div>
+          <div class="segmented" id="optCount">
+            <button data-v="10">10</button>
+            <button data-v="20">20</button>
+            <button data-v="40">40</button>
+            <button data-v="0" class="on">Tất cả</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="resume-card hidden" id="resumeCard">
+        <div>
+          <div class="setting-title">Bạn đang làm dở một bài</div>
+          <div class="setting-sub" id="resumeInfo"></div>
+        </div>
+        <div class="resume-actions">
+          <button class="btn ghost" id="discardBtn">Bỏ qua</button>
+          <button class="btn primary" id="resumeBtn"><span class="material-symbols-rounded">play_arrow</span> Tiếp tục</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== QUIZ ========== -->
+    <section id="quizView" class="view">
+      <div class="quiz-wrap">
+        <!-- Live Room Status Bar (Active when in Live mode) -->
+        <div class="live-room-bar hidden" id="liveRoomBar">
+          <div class="live-room-info">
+            <span class="live-pulse"></span>
+            <span class="live-room-code" id="liveRoomCode">PHÒNG: SHDC</span>
+            <span class="live-members-count" id="liveMembersCount">(1/10 bạn)</span>
+          </div>
+          <div class="live-members-list" id="liveMembersList"></div>
+          <div class="live-room-actions">
+            <button class="btn ghost sm" id="openChatBtn" title="Mở hộp chat">
+              <span class="material-symbols-rounded">chat</span>
+              <span id="unreadChatBadge" class="unread-badge hidden">0</span>
+            </button>
+            <button class="btn outline sm" id="leaveRoomBtn" title="Thoát phòng">
+              <span class="material-symbols-rounded">logout</span> Rời phòng
+            </button>
+          </div>
+        </div>
+
+        <div class="live-sync-banner hidden" id="liveSyncBanner"></div>
+
+        <div class="quiz-head">
+          <div class="quiz-title">
+            <span class="material-symbols-rounded">menu_book</span>
+            <span id="quizChapter">—</span>
+          </div>
+          <div class="quiz-tools">
+            <span class="score-pill good" title="Số câu đúng"><span class="material-symbols-rounded">check</span><b id="scoreGood">0</b></span>
+            <span class="score-pill bad" title="Số câu sai"><span class="material-symbols-rounded">close</span><b id="scoreBad">0</b></span>
+            <button class="btn tonal sm" id="shuffleBtn" title="Xáo trộn lại câu hỏi và đáp án">
+              <span class="material-symbols-rounded">shuffle</span><span class="hide-sm">Xáo trộn</span>
+            </button>
+            <button class="icon-btn" id="gridBtn" title="Danh sách câu hỏi">
+              <span class="material-symbols-rounded">grid_view</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="progress"><div class="progress-bar" id="progressBar"></div></div>
+
+        <article class="q-card" id="qCard">
+          <div class="q-meta">
+            <span class="q-count" id="qCount">1 / 50</span>
+            <span class="q-origin" id="qOrigin"></span>
+          </div>
+          <h2 class="q-text" id="qText"></h2>
+          <div class="options" id="options"></div>
+          <div class="hint-box hidden" id="hintBox">
+            <span class="material-symbols-rounded">lightbulb</span>
+            <span id="hintText"></span>
+          </div>
+          <div class="exp-box hidden" id="expBox">
+            <div class="exp-header" id="expHeader">
+              <span class="material-symbols-rounded" id="expIcon">school</span>
+              <span id="expBadge" class="exp-badge"></span>
+            </div>
+            <div class="exp-content" id="expContent"></div>
+          </div>
+        </article>
+
+        <div class="q-nav">
+          <button class="btn ghost" id="hintBtn"><span class="material-symbols-rounded">lightbulb</span> Gợi ý</button>
+          <div class="q-nav-right">
+            <button class="btn outline" id="prevBtn"><span class="material-symbols-rounded">arrow_back</span> Trước</button>
+            <button class="btn primary" id="nextBtn">Tiếp <span class="material-symbols-rounded">arrow_forward</span></button>
+          </div>
+        </div>
+        <p class="kbd-help">Phím tắt: <kbd>A</kbd>–<kbd>D</kbd> hoặc <kbd>1</kbd>–<kbd>4</kbd> chọn đáp án · <kbd>←</kbd> <kbd>→</kbd> chuyển câu · <kbd>H</kbd> gợi ý</p>
+      </div>
+
+      <!-- Navigator drawer -->
+      <aside class="drawer" id="drawer">
+        <div class="drawer-head">
+          <h3>Danh sách câu hỏi</h3>
+          <button class="icon-btn" id="closeDrawer"><span class="material-symbols-rounded">close</span></button>
+        </div>
+        <div class="legend">
+          <span><i class="dot good"></i>Đúng</span>
+          <span><i class="dot bad"></i>Sai</span>
+          <span><i class="dot"></i>Chưa làm</span>
+        </div>
+        <div class="nav-grid" id="navGrid"></div>
+        <button class="btn primary full" id="finishBtn"><span class="material-symbols-rounded">flag</span> Nộp bài & xem kết quả</button>
+      </aside>
+
+      <!-- Live Chat Drawer -->
+      <aside class="chat-drawer" id="chatDrawer">
+        <div class="chat-drawer-head">
+          <div class="chat-title">
+            <span class="material-symbols-rounded">forum</span>
+            <h3>Trò chuyện Live (<span id="chatMembersCount">1</span> bạn)</h3>
+          </div>
+          <button class="icon-btn" id="closeChatBtn"><span class="material-symbols-rounded">close</span></button>
+        </div>
+        <div class="chat-reactions">
+          <span>Thả cảm xúc:</span>
+          <button class="reaction-btn" data-e="❤️">❤️</button>
+          <button class="reaction-btn" data-e="🔥">🔥</button>
+          <button class="reaction-btn" data-e="👏">👏</button>
+          <button class="reaction-btn" data-e="😂">😂</button>
+          <button class="reaction-btn" data-e="💡">💡</button>
+        </div>
+        <div class="chat-messages" id="chatMessages">
+          <div class="chat-sys-msg">Chào mừng bạn vào phòng học chung! Hãy cùng thảo luận nhé.</div>
+        </div>
+        <form class="chat-input-bar" id="chatForm">
+          <input type="text" id="chatInput" placeholder="Nhập tin nhắn để nói chuyện..." maxlength="200" autocomplete="off" />
+          <button type="submit" class="btn primary sm" id="chatSendBtn">
+            <span class="material-symbols-rounded">send</span>
+          </button>
+        </form>
+      </aside>
+
+      <!-- Floating Chat Open Button (when drawer is closed) -->
+      <button class="floating-chat-btn hidden" id="floatingChatBtn" title="Mở khung trò chuyện">
+        <span class="material-symbols-rounded">chat</span>
+        <span id="floatingUnreadBadge" class="unread-badge hidden">0</span>
+      </button>
+
+      <!-- Floating Reactions Layer (Bay lên màn hình) -->
+      <div id="reactionOverlay" class="reaction-overlay"></div>
+
+      <div class="scrim" id="scrim"></div>
+    </section>
+
+    <!-- ========== RESULT ========== -->
+    <section id="resultView" class="view">
+      <div class="result-wrap">
+        <div class="result-card">
+          <div class="ring" id="ring">
+            <svg viewBox="0 0 120 120">
+              <circle cx="60" cy="60" r="52" class="ring-bg" />
+              <circle cx="60" cy="60" r="52" class="ring-fg" id="ringFg" />
+            </svg>
+            <div class="ring-label"><b id="resPercent">0%</b><small>chính xác</small></div>
+          </div>
+          <h2 id="resTitle">Hoàn thành!</h2>
+          <p id="resSub"></p>
+          <div class="res-stats">
+            <div><b id="resGood">0</b><span>Đúng</span></div>
+            <div><b id="resBad">0</b><span>Sai</span></div>
+            <div><b id="resSkip">0</b><span>Bỏ qua</span></div>
+          </div>
+          <div class="res-actions">
+            <button class="btn outline" id="reviewWrongBtn"><span class="material-symbols-rounded">replay</span> Làm lại câu sai</button>
+            <button class="btn tonal" id="retryBtn"><span class="material-symbols-rounded">shuffle</span> Xáo trộn & làm lại</button>
+            <button class="btn primary" id="backHomeBtn"><span class="material-symbols-rounded">home</span> Trang chủ</button>
+          </div>
+        </div>
+
+        <div class="review">
+          <div class="review-head">
+            <h3>Xem lại bài làm</h3>
+            <div class="segmented" id="reviewFilter">
+              <button data-f="wrong" class="on">Câu sai</button>
+              <button data-f="all">Tất cả</button>
+            </div>
+          </div>
+          <div id="reviewList"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

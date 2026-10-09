@@ -1,0 +1,22 @@
+{
+  "name": "quiz-sinh-hoc-a1",
+  "version": "1.0.0",
+  "description": "Ứng dụng ôn tập trắc nghiệm Sinh học A1 với giao diện NotebookLM & phòng học trực tuyến Live Co-op 10 người",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "quiz",
+    "sinh-hoc-a1",
+    "can-tho-university",
+    "notebooklm",
+    "websocket",
+    "multiplayer-quiz"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.22.0"
+  }
+}
