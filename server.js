@@ -112,8 +112,14 @@ function getMemberList(room) {
   return Array.from(room.members.values()).map(m => ({
     id: m.id,
     name: m.name,
-    isHost: m.isHost,
-    status: m.status // 'online' hoặc 'offline'
+    isHost: !!m.isHost,
+    status: m.status || 'online',       // 'online' hoặc 'offline'
+    activity: m.activity || 'active',   // 'active' (đang ở tab) hoặc 'away' (chuyển tab)
+    answerStatus: m.answerStatus || 'thinking', // 'thinking' (đang suy nghĩ) hoặc 'answered' (đã chọn)
+    score: m.score || 0,
+    streak: m.streak || 0,
+    voiceActive: !!m.voiceActive,
+    voiceMuted: !!m.voiceMuted
   }));
 }
 
@@ -126,22 +132,39 @@ function kickMember(room, userId) {
     member.kickTimer = null;
   }
 
+  const wasHost = member.isHost;
   room.members.delete(userId);
   console.log(`[Kick] ${member.name} (id:${userId}) bị kick do out quá ${KICK_TIMEOUT_MS/1000}s`);
 
-  // Nếu người bị kick là host thì chuyển quyền host cho người online đầu tiên
-  if (member.isHost && room.members.size > 0) {
-    const firstOnline = Array.from(room.members.values()).find(m => m.status === 'online') || Array.from(room.members.values())[0];
-    if (firstOnline) firstOnline.isHost = true;
+  // Nếu người bị kick là host thì tự động chuyển quyền host cho thành viên online tiếp theo
+  let newHost = null;
+  if (wasHost && room.members.size > 0) {
+    newHost = Array.from(room.members.values()).find(m => m.status === 'online') || Array.from(room.members.values())[0];
+    if (newHost) {
+      newHost.isHost = true;
+      console.log(`[Host Transfer] Quyền host chuyển sang cho ${newHost.name}`);
+    }
   }
 
   broadcastToRoom(room, {
     type: 'user_kicked',
     userId: member.id,
     userName: member.name,
+    newHostId: newHost ? newHost.id : null,
+    newHostName: newHost ? newHost.name : null,
     members: getMemberList(room),
     message: `${member.name} đã bị kick khỏi phòng do ngắt kết nối quá ${KICK_TIMEOUT_MS/1000} giây.`
   });
+
+  if (newHost) {
+    broadcastToRoom(room, {
+      type: 'host_transferred',
+      newHostId: newHost.id,
+      newHostName: newHost.name,
+      members: getMemberList(room),
+      message: `👑 Host cũ đã vắng mặt quá 90 giây. ${newHost.name} hiện là Host mới của phòng!`
+    });
+  }
 
   // Nếu phòng không còn ai thì xoá phòng
   if (room.members.size === 0) {
@@ -183,6 +206,7 @@ wss.on('connection', (ws) => {
             }
             member.ws = ws;
             member.status = 'online';
+            member.activity = 'active';
             member.disconnectAt = null;
             if (userName) member.name = userName;
 
@@ -203,6 +227,7 @@ wss.on('connection', (ws) => {
               userId: member.id,
               userName: member.name,
               status: 'online',
+              activity: 'active',
               members: getMemberList(room),
               message: `${member.name} đã kết nối lại phòng!`
             }, ws);
@@ -224,6 +249,12 @@ wss.on('connection', (ws) => {
               isHost: isFirstUser,
               ws: ws,
               status: 'online',
+              activity: 'active',
+              answerStatus: 'thinking',
+              score: 0,
+              streak: 0,
+              voiceActive: false,
+              voiceMuted: false,
               kickTimer: null,
               disconnectAt: null,
               joinedAt: Date.now()
@@ -252,18 +283,36 @@ wss.on('connection', (ws) => {
           break;
         }
 
-        // --- 2. BẮT ĐẦU HOẶC ĐỒNG BỘ QUIZ TRONG PHÒNG ---
+        // --- 2. BẮT ĐẦU HOẶC ĐỒNG BỘ QUIZ TRONG PHÒNG (CO-OP HOẶC VERSUS) ---
         case 'sync_start_quiz': {
           if (!currentRoom) return;
           const member = currentRoom.members.get(currentUserId);
           const byName = member ? member.name : 'Một bạn';
 
+          const mode = msg.mode === 'versus' ? 'versus' : 'coop';
+          const timerSeconds = parseInt(msg.timerSeconds, 10) || 30;
+
+          // Reset điểm số và trạng thái trả lời của toàn bộ thành viên
+          for (const m of currentRoom.members.values()) {
+            m.score = 0;
+            m.streak = 0;
+            m.answerStatus = 'thinking';
+          }
+
+          currentRoom.mode = mode;
+          currentRoom.timerSeconds = timerSeconds;
+
           currentRoom.quizState = {
+            subjectId: msg.subjectId,
+            subjectTitle: msg.subjectTitle,
             chapterId: msg.chapterId,
             chapterTitle: msg.chapterTitle,
             questions: msg.questions,
             currentIndex: 0,
             userAnswers: {},
+            playerAnswers: {}, // userId -> { optIndex, isCorrect, points }
+            mode: mode,
+            timerSeconds: timerSeconds,
             startedBy: byName,
             timestamp: Date.now()
           };
@@ -271,17 +320,20 @@ wss.on('connection', (ws) => {
           broadcastToRoom(currentRoom, {
             type: 'quiz_started',
             quizState: currentRoom.quizState,
+            members: getMemberList(currentRoom),
             userName: byName
           });
           break;
         }
 
-        // --- 3. ĐỒNG BỘ CHỌN ĐÁP ÁN (AI CHỌN THÌ BÊN KIA CŨNG BỊ CHỌN THEO) ---
+        // --- 3. ĐỒNG BỘ CHỌN ĐÁP ÁN (CO-OP MODE: AI CHỌN THÌ CẢ PHÒNG CHỌN THEO) ---
         case 'sync_select_option': {
           if (!currentRoom || !currentRoom.quizState) return;
           const member = currentRoom.members.get(currentUserId);
           const byName = member ? member.name : 'Một bạn';
           const { qIndex, optIndex, isCorrect } = msg;
+
+          if (member) member.answerStatus = 'answered';
 
           currentRoom.quizState.userAnswers[qIndex] = {
             selectedIndex: optIndex,
@@ -294,22 +346,93 @@ wss.on('connection', (ws) => {
             qIndex,
             optIndex,
             isCorrect,
-            userName: byName
+            userName: byName,
+            members: getMemberList(currentRoom)
           });
           break;
         }
 
-        // --- 4. ĐỒNG BỘ CHUYỂN CÂU HỎI (TIẾP TỤC / QUAY LẠI) ---
+        // --- 3B. ĐẤU ĐIỂM (VERSUS / RACE MODE): MỖI NGƯỜI TỰ BẤM CHỌN VÀ TÍNH ĐIỂM THEO TỐC ĐỘ ---
+        case 'versus_submit_answer': {
+          if (!currentRoom || !currentRoom.quizState) return;
+          const member = currentRoom.members.get(currentUserId);
+          if (!member) return;
+
+          const { qIndex, optIndex, isCorrect, timeLeft, totalTime } = msg;
+
+          // Tính điểm:
+          // Trả lời đúng trong 3 giây đầu nhận tối đa 1000 điểm; thời gian còn lại điểm giảm dần về tối thiểu 200đ
+          let points = 0;
+          if (isCorrect) {
+            const t = Math.max(0, timeLeft !== undefined ? timeLeft : 0);
+            const tot = totalTime || 30;
+            if (t >= tot - 3) {
+              points = 1000;
+            } else {
+              const remainingRatio = t / Math.max(1, tot - 3);
+              points = Math.max(200, Math.round(200 + 800 * remainingRatio));
+            }
+            member.streak = (member.streak || 0) + 1;
+            // Thưởng thêm chuỗi đúng (Streak bonus)
+            const streakBonus = Math.min(250, (member.streak - 1) * 50);
+            points += streakBonus;
+          } else {
+            points = 0;
+            member.streak = 0;
+          }
+
+          member.score = (member.score || 0) + points;
+          member.answerStatus = 'answered';
+
+          if (!currentRoom.quizState.playerAnswers) {
+            currentRoom.quizState.playerAnswers = {};
+          }
+          currentRoom.quizState.playerAnswers[currentUserId] = {
+            optIndex,
+            isCorrect,
+            points,
+            score: member.score,
+            streak: member.streak
+          };
+
+          const onlineMembers = Array.from(currentRoom.members.values()).filter(m => m.status === 'online');
+          const allAnswered = onlineMembers.length > 0 && onlineMembers.every(m => m.answerStatus === 'answered');
+
+          broadcastToRoom(currentRoom, {
+            type: 'versus_answer_recorded',
+            userId: currentUserId,
+            userName: member.name,
+            qIndex,
+            isCorrect,
+            points,
+            score: member.score,
+            streak: member.streak,
+            members: getMemberList(currentRoom),
+            allAnswered: allAnswered,
+            playerAnswers: allAnswered ? currentRoom.quizState.playerAnswers : undefined
+          });
+          break;
+        }
+
+        // --- 4. ĐỒNG BỘ CHUYỂN CÂU HỎI ---
         case 'sync_nav_question': {
           if (!currentRoom || !currentRoom.quizState) return;
           const member = currentRoom.members.get(currentUserId);
           const byName = member ? member.name : 'Một bạn';
 
           currentRoom.quizState.currentIndex = msg.qIndex;
+          currentRoom.quizState.playerAnswers = {}; // Reset câu trả lời của lượt thi đấu này
+
+          // Reset trạng thái trả lời của toàn bộ thành viên về 'thinking'
+          for (const m of currentRoom.members.values()) {
+            m.answerStatus = 'thinking';
+          }
+
           broadcastToRoom(currentRoom, {
             type: 'question_navigated',
             qIndex: msg.qIndex,
-            userName: byName
+            userName: byName,
+            members: getMemberList(currentRoom)
           });
           break;
         }
@@ -323,11 +446,17 @@ wss.on('connection', (ws) => {
           currentRoom.quizState.questions = msg.questions;
           currentRoom.quizState.currentIndex = 0;
           currentRoom.quizState.userAnswers = {};
+          currentRoom.quizState.playerAnswers = {};
+
+          for (const m of currentRoom.members.values()) {
+            m.answerStatus = 'thinking';
+          }
 
           broadcastToRoom(currentRoom, {
             type: 'quiz_shuffled',
             questions: msg.questions,
-            userName: byName
+            userName: byName,
+            members: getMemberList(currentRoom)
           });
           break;
         }
@@ -372,24 +501,90 @@ wss.on('connection', (ws) => {
           break;
         }
 
-        // --- 8. CHỦ ĐỘNG RỜI PHÒNG (BẤM NÚT "RỜI PHÒNG") ---
+        // --- 8. THEO DÕI HOẠT ĐỘNG THÀNH VIÊN (CHUYỂN TAB / QUAY LẠI TAB) ---
+        case 'user_activity': {
+          if (!currentRoom) return;
+          const member = currentRoom.members.get(currentUserId);
+          if (member) {
+            member.activity = msg.state === 'away' ? 'away' : 'active';
+            broadcastToRoom(currentRoom, {
+              type: 'user_activity_changed',
+              userId: currentUserId,
+              userName: member.name,
+              activity: member.activity,
+              members: getMemberList(currentRoom)
+            });
+          }
+          break;
+        }
+
+        // --- 9. WEBRTC VOICE CHAT (SIGNALING OFFER/ANSWER/CANDIDATE) ---
+        case 'voice_signal': {
+          if (!currentRoom) return;
+          const targetMember = currentRoom.members.get(msg.targetUserId);
+          if (targetMember && targetMember.ws && targetMember.ws.readyState === WebSocket.OPEN) {
+            targetMember.ws.send(JSON.stringify({
+              type: 'voice_signal',
+              senderUserId: currentUserId,
+              signal: msg.signal
+            }));
+          }
+          break;
+        }
+
+        case 'voice_mute_state': {
+          if (!currentRoom) return;
+          const member = currentRoom.members.get(currentUserId);
+          if (member) {
+            member.voiceActive = !!msg.voiceActive;
+            member.voiceMuted = !!msg.voiceMuted;
+            broadcastToRoom(currentRoom, {
+              type: 'voice_mute_changed',
+              userId: currentUserId,
+              userName: member.name,
+              voiceActive: member.voiceActive,
+              voiceMuted: member.voiceMuted,
+              members: getMemberList(currentRoom)
+            });
+          }
+          break;
+        }
+
+        // --- 10. CHỦ ĐỘNG RỜI PHÒNG (BẤM NÚT "RỜI PHÒNG") ---
         case 'leave_room': {
           if (currentRoom && currentUserId) {
             const member = currentRoom.members.get(currentUserId);
             if (member) {
               if (member.kickTimer) clearTimeout(member.kickTimer);
+              const wasHost = member.isHost;
               currentRoom.members.delete(currentUserId);
-              if (member.isHost && currentRoom.members.size > 0) {
-                const first = Array.from(currentRoom.members.values()).find(m => m.status === 'online') || Array.from(currentRoom.members.values())[0];
-                if (first) first.isHost = true;
+
+              let newHost = null;
+              if (wasHost && currentRoom.members.size > 0) {
+                newHost = Array.from(currentRoom.members.values()).find(m => m.status === 'online') || Array.from(currentRoom.members.values())[0];
+                if (newHost) newHost.isHost = true;
               }
+
               broadcastToRoom(currentRoom, {
                 type: 'user_left',
                 userId: currentUserId,
                 userName: member.name,
+                newHostId: newHost ? newHost.id : null,
+                newHostName: newHost ? newHost.name : null,
                 members: getMemberList(currentRoom),
                 message: `${member.name} đã rời phòng.`
               });
+
+              if (newHost) {
+                broadcastToRoom(currentRoom, {
+                  type: 'host_transferred',
+                  newHostId: newHost.id,
+                  newHostName: newHost.name,
+                  members: getMemberList(currentRoom),
+                  message: `👑 ${member.name} đã rời phòng. ${newHost.name} hiện là Host mới!`
+                });
+              }
+
               if (currentRoom.members.size === 0) {
                 rooms.delete(currentRoom.id);
               }

@@ -6,15 +6,35 @@
   'use strict';
 
   // --- Sound Effects using Web Audio API (No external assets needed) ---
+  // --- Sound Effects using Web Audio API (No external assets needed) ---
   const Sound = {
     ctx: null,
+    muted: localStorage.getItem('sh_sound_muted') === 'true',
     init() {
       if (!this.ctx) {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         if (AudioCtx) this.ctx = new AudioCtx();
       }
     },
+    toggleMute() {
+      this.muted = !this.muted;
+      localStorage.setItem('sh_sound_muted', this.muted);
+      this.updateIcons();
+      showToast(this.muted ? '🔇 Đã tắt âm thanh' : '🔊 Đã bật âm thanh');
+    },
+    updateIcons() {
+      const iconName = this.muted ? 'volume_off' : 'volume_up';
+      const topIcon = document.getElementById('soundIcon');
+      const quizIcon = document.getElementById('quizSoundIcon');
+      const sideIcon = document.getElementById('sidebarSoundIcon');
+      const sideText = document.getElementById('sidebarSoundText');
+      if (topIcon) topIcon.textContent = iconName;
+      if (quizIcon) quizIcon.textContent = iconName;
+      if (sideIcon) sideIcon.textContent = iconName;
+      if (sideText) sideText.textContent = this.muted ? 'Âm thanh: Đã tắt' : 'Âm thanh: Đang bật';
+    },
     playTone(freq, type, duration, delay = 0, gainLevel = 0.12) {
+      if (this.muted) return;
       try {
         this.init();
         if (!this.ctx) return;
@@ -46,6 +66,19 @@
       this.playTone(440, 'sine', 0.08, 0, 0.08);
       this.playTone(550, 'sine', 0.08, 0.05, 0.08);
       this.playTone(660, 'sine', 0.08, 0.1, 0.08);
+    },
+    tick() {
+      this.playTone(880, 'sine', 0.05, 0, 0.06);
+    },
+    tickUrgent() {
+      this.playTone(1100, 'triangle', 0.09, 0, 0.14);
+      this.playTone(880, 'sine', 0.06, 0.04, 0.1);
+    },
+    streak() {
+      this.playTone(523.25, 'sine', 0.1, 0, 0.15);
+      this.playTone(659.25, 'sine', 0.1, 0.08, 0.15);
+      this.playTone(783.99, 'sine', 0.12, 0.16, 0.15);
+      this.playTone(1046.5, 'sine', 0.25, 0.24, 0.18);
     }
   };
 
@@ -136,12 +169,15 @@
     shuffleA: false,
     theme: localStorage.getItem('sh_theme') || 'dark',
 
-    // Live Co-op State (Phòng 10 người)
+    // Live Co-op & Versus State (Phòng 10 người)
     liveMode: false,
+    liveModeType: 'coop', // 'coop' | 'versus'
+    liveTimerSeconds: 30, // 15, 30, 45 giây mỗi câu
     roomId: null,
     userName: localStorage.getItem('sh_username') || '',
     currentUser: null,
     members: [],
+    roundLeaderboard: [],
 
     // Best scores map: key -> { score, total, pct }
     highScores: JSON.parse(localStorage.getItem('sh_highscores') || '{}')
@@ -171,13 +207,588 @@
     };
   }
 
-  // --- Live Room WebSocket Controller (Phòng 5 người, 0-Latency) ---
+  // --- Question Countdown Timer (30s / câu, khẩn cấp 5s cuối) ---
+  const QuestionTimer = {
+    totalSeconds: 30,
+    timeLeft: 30,
+    interval: null,
+    active: false,
+
+    start(seconds = 30) {
+      this.stop();
+      this.totalSeconds = seconds || 30;
+      this.timeLeft = this.totalSeconds;
+      this.active = true;
+
+      const wrap = document.getElementById('questionTimerWrap');
+      if (wrap) {
+        wrap.classList.remove('hidden', 'urgent');
+      }
+      this.updateUI();
+
+      this.interval = setInterval(() => {
+        this.timeLeft--;
+        this.updateUI();
+
+        if (this.timeLeft <= 5 && this.timeLeft > 0) {
+          Sound.tickUrgent();
+        }
+
+        if (this.timeLeft <= 0) {
+          this.stop();
+          this.onExpire();
+        }
+      }, 1000);
+    },
+
+    stop() {
+      if (this.interval) {
+        clearInterval(this.interval);
+        this.interval = null;
+      }
+      this.active = false;
+    },
+
+    hide() {
+      this.stop();
+      const wrap = document.getElementById('questionTimerWrap');
+      if (wrap) wrap.classList.add('hidden');
+    },
+
+    updateUI() {
+      const countdownEl = document.getElementById('timerCountdown');
+      const barEl = document.getElementById('questionTimerBar');
+      const wrap = document.getElementById('questionTimerWrap');
+
+      if (countdownEl) countdownEl.textContent = `${Math.max(0, this.timeLeft)}s`;
+      if (barEl) {
+        const pct = Math.max(0, (this.timeLeft / this.totalSeconds) * 100);
+        barEl.style.width = pct + '%';
+      }
+      if (wrap) {
+        if (this.timeLeft <= 5 && this.timeLeft > 0) {
+          wrap.classList.add('urgent');
+        } else {
+          wrap.classList.remove('urgent');
+        }
+      }
+    },
+
+    onExpire() {
+      if (State.liveMode && State.liveModeType === 'versus') {
+        if (!State.userAnswers[State.currentIndex]) {
+          App.handleOptionClick(-1);
+        }
+      }
+    }
+  };
+
+  // --- WebRTC Voice Chat Manager (P2P Mesh qua STUN Google) ---
+  const VoiceChat = {
+    localStream: null,
+    peers: new Map(), // userId -> RTCPeerConnection
+    audioElements: new Map(), // userId -> HTMLAudioElement
+    joined: false,
+    muted: false,
+
+    async toggleMic() {
+      if (!this.joined) {
+        await this.joinVoice();
+      } else {
+        this.setMute(!this.muted);
+      }
+    },
+
+    async joinVoice() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showToast('Trình duyệt không hỗ trợ truy cập Microphone WebRTC!');
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        this.localStream = stream;
+        this.joined = true;
+        this.muted = false;
+
+        this.updateBtnUI();
+        showToast('🎙️ Đã kết nối Micro! Bạn có thể nói chuyện trực tiếp với bạn bè.');
+
+        LiveRoom.send({
+          type: 'voice_mute_state',
+          voiceActive: true,
+          voiceMuted: false
+        });
+
+        State.members.forEach(m => {
+          if (m.id !== State.currentUser?.id && m.status === 'online') {
+            this.initPeer(m.id, true);
+          }
+        });
+      } catch (err) {
+        console.error('[Voice Error]', err);
+        showToast('Không thể bật Mic: Vui lòng cho phép quyền Microphone trong trình duyệt!');
+      }
+    },
+
+    setMute(muted) {
+      if (!this.joined || !this.localStream) return;
+      this.muted = muted;
+      this.localStream.getAudioTracks().forEach(track => {
+        track.enabled = !muted;
+      });
+      this.updateBtnUI();
+      showToast(muted ? '🔇 Đã tắt Micro' : '🎙️ Đã bật Micro');
+
+      LiveRoom.send({
+        type: 'voice_mute_state',
+        voiceActive: true,
+        voiceMuted: muted
+      });
+    },
+
+    leaveVoice() {
+      if (this.localStream) {
+        this.localStream.getTracks().forEach(t => t.stop());
+        this.localStream = null;
+      }
+      this.peers.forEach(pc => {
+        try { pc.close(); } catch (e) {}
+      });
+      this.peers.clear();
+      this.audioElements.forEach(el => el.remove());
+      this.audioElements.clear();
+      this.joined = false;
+      this.muted = false;
+      this.updateBtnUI();
+    },
+
+    updateBtnUI() {
+      const btn = document.getElementById('voiceMicBtn');
+      const icon = document.getElementById('voiceMicIcon');
+      const label = document.getElementById('voiceMicLabel');
+      if (!btn) return;
+
+      if (!this.joined) {
+        btn.className = 'btn outline sm voice-btn';
+        if (icon) icon.textContent = 'mic_off';
+        if (label) label.textContent = 'Bật Mic';
+      } else if (this.muted) {
+        btn.className = 'btn outline sm voice-btn muted';
+        if (icon) icon.textContent = 'mic_off';
+        if (label) label.textContent = 'Đang tắt mic';
+      } else {
+        btn.className = 'btn outline sm voice-btn active';
+        if (icon) icon.textContent = 'mic';
+        if (label) label.textContent = 'Đang nói';
+      }
+    },
+
+    initPeer(targetUserId, isInitiator) {
+      if (this.peers.has(targetUserId)) return this.peers.get(targetUserId);
+
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      });
+
+      this.peers.set(targetUserId, pc);
+
+      if (this.localStream) {
+        this.localStream.getTracks().forEach(track => {
+          pc.addTrack(track, this.localStream);
+        });
+      }
+
+      pc.ontrack = (event) => {
+        let audio = this.audioElements.get(targetUserId);
+        if (!audio) {
+          audio = new Audio();
+          audio.autoplay = true;
+          this.audioElements.set(targetUserId, audio);
+        }
+        audio.srcObject = event.streams[0];
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          LiveRoom.send({
+            type: 'voice_signal',
+            targetUserId: targetUserId,
+            signal: { candidate: event.candidate }
+          });
+        }
+      };
+
+      if (isInitiator) {
+        pc.onnegotiationneeded = async () => {
+          try {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            LiveRoom.send({
+              type: 'voice_signal',
+              targetUserId: targetUserId,
+              signal: { sdp: pc.localDescription }
+            });
+          } catch (e) {
+            console.error('[Peer Offer Error]', e);
+          }
+        };
+      }
+
+      return pc;
+    },
+
+    async handleSignal(senderUserId, signal) {
+      let pc = this.peers.get(senderUserId);
+      if (!pc) {
+        pc = this.initPeer(senderUserId, false);
+      }
+
+      try {
+        if (signal.sdp) {
+          await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+          if (signal.sdp.type === 'offer') {
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            LiveRoom.send({
+              type: 'voice_signal',
+              targetUserId: senderUserId,
+              signal: { sdp: pc.localDescription }
+            });
+          }
+        } else if (signal.candidate) {
+          await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+        }
+      } catch (e) {
+        console.error('[Handle Signal Error]', e);
+      }
+    }
+  };
+
+  // --- Khung Chat Nổi & Xem Trước Tin Nhắn (Floating Chat) ---
+  const FloatingChat = {
+    unreadCount: 0,
+    previewTimer: null,
+    isOpen: false,
+    isMinimized: false,
+
+    init() {
+      const floatBtn = document.getElementById('floatingChatBtn');
+      const openBtn = document.getElementById('openChatBtn');
+      if (floatBtn) floatBtn.addEventListener('click', () => this.toggleWindow());
+      if (openBtn) openBtn.addEventListener('click', () => this.toggleWindow());
+
+      const closeBtn = document.getElementById('closeFloatingChatBtn');
+      const minBtn = document.getElementById('minimizeChatBtn');
+      if (closeBtn) closeBtn.addEventListener('click', () => this.closeWindow());
+      if (minBtn) minBtn.addEventListener('click', () => this.toggleMinimize());
+
+      const closePrevBtn = document.getElementById('closeChatPreviewBtn');
+      const prevToast = document.getElementById('chatFloatingPreview');
+      if (closePrevBtn) {
+        closePrevBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.hidePreview();
+        });
+      }
+      if (prevToast) {
+        prevToast.addEventListener('click', () => {
+          this.hidePreview();
+          this.openWindow();
+        });
+      }
+
+      const form = document.getElementById('chatForm');
+      if (form) {
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          const inp = document.getElementById('chatInput');
+          if (inp && inp.value.trim()) {
+            LiveRoom.sendChatMessage(inp.value.trim());
+            inp.value = '';
+          }
+        });
+      }
+
+      document.querySelectorAll('.chat-reactions .reaction-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const emoji = btn.dataset.e || '👍';
+          LiveRoom.sendReaction(emoji);
+        });
+      });
+    },
+
+    openWindow() {
+      const win = document.getElementById('floatingChatWindow');
+      if (!win) return;
+      this.isOpen = true;
+      this.isMinimized = false;
+      win.classList.remove('hidden', 'minimized');
+      this.unreadCount = 0;
+      this.updateBadges();
+      const inp = document.getElementById('chatInput');
+      if (inp) setTimeout(() => inp.focus(), 150);
+    },
+
+    closeWindow() {
+      const win = document.getElementById('floatingChatWindow');
+      if (!win) return;
+      this.isOpen = false;
+      win.classList.add('hidden');
+    },
+
+    toggleWindow() {
+      if (this.isOpen && !this.isMinimized) {
+        this.closeWindow();
+      } else {
+        this.openWindow();
+      }
+    },
+
+    toggleMinimize() {
+      const win = document.getElementById('floatingChatWindow');
+      if (!win) return;
+      this.isMinimized = !this.isMinimized;
+      win.classList.toggle('minimized', this.isMinimized);
+    },
+
+    showPreview(message) {
+      const preview = document.getElementById('chatFloatingPreview');
+      if (!preview) return;
+
+      const avt = document.getElementById('chatPreviewAvatar');
+      const sender = document.getElementById('chatPreviewSender');
+      const text = document.getElementById('chatPreviewText');
+
+      if (avt) avt.textContent = (message.userName || '?').charAt(0).toUpperCase();
+      if (sender) sender.textContent = message.userName || 'Bạn học';
+      if (text) text.textContent = message.text || '';
+
+      preview.classList.remove('hidden');
+      clearTimeout(this.previewTimer);
+      this.previewTimer = setTimeout(() => {
+        this.hidePreview();
+      }, 4500);
+    },
+
+    hidePreview() {
+      const preview = document.getElementById('chatFloatingPreview');
+      if (preview) preview.classList.add('hidden');
+    },
+
+    updateBadges() {
+      const b1 = document.getElementById('unreadChatBadge');
+      const b2 = document.getElementById('floatingUnreadBadge');
+      [b1, b2].forEach(b => {
+        if (!b) return;
+        if (this.unreadCount > 0) {
+          b.textContent = this.unreadCount;
+          b.classList.remove('hidden');
+        } else {
+          b.classList.add('hidden');
+        }
+      });
+    }
+  };
+
+  // --- Bảng Xếp Hạng Trực Tiếp (Live Leaderboard trong Versus Mode) ---
+  const Leaderboard = {
+    nextTimer: null,
+    countdownSeconds: 5,
+
+    show(roundPointsMap = {}) {
+      const modal = document.getElementById('liveLeaderboardModal');
+      const list = document.getElementById('leaderboardList');
+      const roundText = document.getElementById('leaderboardRoundText');
+      const timerBadge = document.getElementById('leaderboardTimerBadge');
+      if (!modal || !list) return;
+
+      const sorted = [...State.members].sort((a, b) => (b.score || 0) - (a.score || 0));
+
+      if (roundText) {
+        roundText.textContent = `Câu ${State.currentIndex + 1}/${State.questions.length} · Kết quả vòng đấu`;
+      }
+
+      const colors = ['#4285f4', '#ea4335', '#fbbc05', '#34a853', '#9b72cb', '#ff6d00', '#00b0ff', '#00c853'];
+      let html = '';
+
+      sorted.forEach((m, idx) => {
+        const rank = idx + 1;
+        const isMe = State.currentUser && m.id === State.currentUser.id;
+        const color = colors[idx % colors.length];
+        const roundPts = roundPointsMap[m.id]?.points || 0;
+        const medal = rank === 1 ? '🥇' : (rank === 2 ? '🥈' : (rank === 3 ? '🥉' : rank));
+
+        html += `
+          <div class="leaderboard-item ${isMe ? 'me' : ''} ${rank <= 3 ? 'top-' + rank : ''}">
+            <div class="rank-badge">${medal}</div>
+            <div class="leaderboard-avatar" style="background-color:${color}">
+              ${(m.name || '?').charAt(0).toUpperCase()}
+            </div>
+            <div class="leaderboard-user-info">
+              <div class="leaderboard-name">
+                <span>${m.name}${isMe ? ' (Bạn)' : ''}</span>
+                ${m.isHost ? '<span>👑</span>' : ''}
+              </div>
+              ${m.streak >= 2 ? `<div class="leaderboard-streak">🔥 Chuỗi ${m.streak} câu đúng</div>` : ''}
+            </div>
+            <div class="leaderboard-score-info">
+              <span class="round-points ${roundPts > 0 ? '' : 'zero'}">${roundPts > 0 ? '+' + roundPts + 'đ' : '0đ'}</span>
+              <span class="total-score">${m.score || 0}đ</span>
+            </div>
+          </div>
+        `;
+      });
+
+      list.innerHTML = html;
+      modal.classList.remove('hidden');
+
+      this.countdownSeconds = 5;
+      if (timerBadge) timerBadge.textContent = `Câu tiếp theo trong: ${this.countdownSeconds}s`;
+
+      clearInterval(this.nextTimer);
+      this.nextTimer = setInterval(() => {
+        this.countdownSeconds--;
+        if (timerBadge) timerBadge.textContent = `Câu tiếp theo trong: ${this.countdownSeconds}s`;
+        if (this.countdownSeconds <= 0) {
+          clearInterval(this.nextTimer);
+          modal.classList.add('hidden');
+          if (State.currentUser?.isHost) {
+            App.nextQuestion();
+          }
+        }
+      }, 1000);
+
+      const closeBtn = document.getElementById('closeLeaderboardModal');
+      const closeBtn2 = document.getElementById('leaderboardCloseBtn');
+      const nextBtn = document.getElementById('leaderboardNextBtn');
+
+      const hide = () => {
+        clearInterval(this.nextTimer);
+        modal.classList.add('hidden');
+      };
+      if (closeBtn) closeBtn.onclick = hide;
+      if (closeBtn2) closeBtn2.onclick = hide;
+      if (nextBtn) {
+        nextBtn.onclick = () => {
+          hide();
+          if (State.currentUser?.isHost) {
+            App.nextQuestion();
+          } else {
+            showToast('Chỉ Host mới có quyền chuyển câu ngay lập tức.');
+          }
+        };
+      }
+    }
+  };
+
+  // --- Danh Mục Bên Trái (Left Sidebar) ---
+  const Sidebar = {
+    init() {
+      const toggleBtn = document.getElementById('sidebarToggleBtn');
+      const closeBtn = document.getElementById('closeSidebarBtn');
+      const scrim = document.getElementById('sidebarScrim');
+      const quickLiveBtn = document.getElementById('navLiveQuickBtn');
+      const sidebarLiveBtn = document.getElementById('sidebarLiveBtn');
+      const addSubjectBtn = document.getElementById('sidebarAddSubjectBtn');
+      const soundBtn = document.getElementById('sidebarSoundBtn');
+      const themeBtn = document.getElementById('sidebarThemeBtn');
+      const helpBtn = document.getElementById('sidebarHelpBtn');
+
+      if (toggleBtn) toggleBtn.addEventListener('click', () => this.toggle(true));
+      if (closeBtn) closeBtn.addEventListener('click', () => this.toggle(false));
+      if (scrim) scrim.addEventListener('click', () => this.toggle(false));
+
+      const scrollToLive = () => {
+        this.toggle(false);
+        if (!State.currentSubjectId) {
+          const courses = window.COURSES_DATA || window.SUBJECTS_DATA || [];
+          if (courses.length > 0) {
+            State.currentSubjectId = courses[0].id;
+            App.renderHome();
+          }
+        }
+        App.switchView('home');
+        setTimeout(() => {
+          const liveCard = document.getElementById('liveCard');
+          if (liveCard) {
+            liveCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            liveCard.style.outline = '2px solid var(--primary)';
+            setTimeout(() => liveCard.style.outline = 'none', 1800);
+          }
+        }, 200);
+      };
+
+      if (quickLiveBtn) quickLiveBtn.addEventListener('click', scrollToLive);
+      if (sidebarLiveBtn) sidebarLiveBtn.addEventListener('click', scrollToLive);
+
+      if (addSubjectBtn) {
+        addSubjectBtn.addEventListener('click', () => {
+          this.toggle(false);
+          const modal = document.getElementById('addSubjectModal');
+          if (modal) modal.classList.remove('hidden');
+        });
+      }
+
+      if (soundBtn) soundBtn.addEventListener('click', () => Sound.toggleMute());
+      if (themeBtn) themeBtn.addEventListener('click', () => App.toggleTheme());
+      if (helpBtn) {
+        helpBtn.addEventListener('click', () => {
+          this.toggle(false);
+          const modal = document.getElementById('addSubjectModal');
+          if (modal) modal.classList.remove('hidden');
+        });
+      }
+    },
+
+    toggle(open) {
+      const sidebar = document.getElementById('appSidebar');
+      const scrim = document.getElementById('sidebarScrim');
+      if (!sidebar) return;
+      if (open === undefined) open = !sidebar.classList.contains('open');
+      sidebar.classList.toggle('open', open);
+      if (scrim) scrim.classList.toggle('show', open);
+    },
+
+    renderSubjectList() {
+      const list = document.getElementById('sidebarSubjectList');
+      if (!list) return;
+      const courses = window.COURSES_DATA || window.SUBJECTS_DATA || [];
+      let html = '';
+      courses.forEach(c => {
+        const isActive = c.id === State.currentSubjectId;
+        const totalQ = c.chapters.reduce((sum, ch) => sum + ch.questions.length, 0);
+        html += `
+          <button class="sidebar-menu-item ${isActive ? 'active' : ''}" data-subject-id="${c.id}">
+            <span class="material-symbols-rounded" style="color:${c.color || 'var(--primary)'}">${c.icon || 'school'}</span>
+            <span>${c.title}</span>
+            <span class="item-badge">${totalQ}c</span>
+          </button>
+        `;
+      });
+      list.innerHTML = html;
+
+      list.querySelectorAll('.sidebar-menu-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const sId = btn.dataset.subjectId;
+          if (sId) {
+            State.currentSubjectId = sId;
+            App.renderHome();
+            this.toggle(false);
+            showToast(`Đã chọn môn: ${App.getCurrentCourse()?.title}`);
+            const wrap = document.getElementById('subjectContentWrap');
+            if (wrap) wrap.scrollIntoView({ behavior: 'smooth' });
+          }
+        });
+      });
+    }
+  };
+
+  // --- Live Room WebSocket Controller (Phòng 10 người, Co-op & Versus) ---
   const LiveRoom = {
     ws: null,
     connected: false,
-    unreadCount: 0,
     bannerTimer: null,
-
     manualLeave: false,
     reconnectTimer: null,
 
@@ -197,9 +808,16 @@
         if (inp) inp.value = savedName;
       }
 
-      // Tự động kết nối lại khi người dùng mở lại tab hoặc bật lại màn hình điện thoại
+      // Theo dõi chuyển tab (visibilitychange): Báo trạng thái away / active
       document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible' && State.liveMode && !this.manualLeave) {
+        const isHidden = document.visibilityState === 'hidden';
+        if (State.liveMode && this.connected) {
+          this.send({
+            type: 'user_activity',
+            state: isHidden ? 'away' : 'active'
+          });
+        }
+        if (!isHidden && State.liveMode && !this.manualLeave) {
           this.checkAndReconnect();
         }
       });
@@ -269,7 +887,6 @@
       this.ws.onclose = () => {
         this.connected = false;
         if (State.liveMode && !this.manualLeave) {
-          // Bị ngắt kết nối do đổi tab, khóa màn hình, tải lại trang -> Tự động thử kết nối lại
           console.log('[LiveRoom] WebSocket closed. Tự động kết nối lại sau 2s...');
           this.reconnectTimer = setTimeout(() => {
             if (State.liveMode && !this.manualLeave) {
@@ -297,9 +914,15 @@
           State.currentUser = msg.user;
           State.members = msg.members || [];
 
+          if (msg.quizState) {
+            State.liveModeType = msg.quizState.mode || 'coop';
+            State.liveTimerSeconds = msg.quizState.timerSeconds || 30;
+          }
+
           this.updateRoomBar();
           this.renderMembers();
           this.renderMessages(msg.messages || []);
+          VoiceChat.updateBtnUI();
 
           if (msg.reconnected) {
             showToast(`Đã khôi phục kết nối vào phòng ${msg.roomId}! (${State.members.length}/10 bạn)`);
@@ -319,13 +942,15 @@
             App.switchView('quiz');
             App.renderCurrentQuestion();
             App.updateDrawerGrid();
+            QuestionTimer.start(State.liveTimerSeconds);
           } else if (!msg.reconnected) {
             showToast('Bạn đã vào phòng! Hãy chọn 1 chương ở dưới để cả phòng cùng làm nhé.');
           }
           break;
         }
 
-        case 'user_status_changed': {
+        case 'user_status_changed':
+        case 'user_activity_changed': {
           State.members = msg.members || [];
           this.updateRoomBar();
           this.renderMembers();
@@ -338,6 +963,23 @@
 
         case 'user_kicked': {
           State.members = msg.members || [];
+          if (msg.newHostId && State.currentUser && msg.newHostId === State.currentUser.id) {
+            State.currentUser.isHost = true;
+          }
+          this.updateRoomBar();
+          this.renderMembers();
+          if (msg.message) {
+            this.addSystemMessage(msg.message);
+            showToast(msg.message);
+          }
+          break;
+        }
+
+        case 'host_transferred': {
+          State.members = msg.members || [];
+          if (State.currentUser) {
+            State.currentUser.isHost = (msg.newHostId === State.currentUser.id);
+          }
           this.updateRoomBar();
           this.renderMembers();
           if (msg.message) {
@@ -359,6 +1001,9 @@
 
         case 'user_left': {
           State.members = msg.members || [];
+          if (msg.newHostId && State.currentUser && msg.newHostId === State.currentUser.id) {
+            State.currentUser.isHost = true;
+          }
           this.updateRoomBar();
           this.renderMembers();
           showToast(msg.message);
@@ -375,24 +1020,35 @@
           State.currentIndex = msg.quizState.currentIndex || 0;
           State.userAnswers = msg.quizState.userAnswers || {};
           State.chapterTitle = msg.quizState.chapterTitle;
-          document.getElementById('quizChapter').textContent = State.chapterTitle;
+          State.liveModeType = msg.quizState.mode || 'coop';
+          State.liveTimerSeconds = msg.quizState.timerSeconds || 30;
+          State.members = msg.members || State.members;
 
-          this.showSyncBanner(`🚀 ${msg.userName} đã chọn bài: ${State.chapterTitle}`);
+          document.getElementById('quizChapter').textContent = State.chapterTitle;
+          this.updateRoomBar();
+          this.renderMembers();
+
+          const modeText = State.liveModeType === 'versus' ? 'Versus (Đấu điểm)' : 'Co-op (Cùng làm)';
+          this.showSyncBanner(`🚀 ${msg.userName} đã bắt đầu bài thi [${modeText}]: ${State.chapterTitle}`);
+
           App.switchView('quiz');
           App.renderCurrentQuestion();
           App.updateDrawerGrid();
+          QuestionTimer.start(State.liveTimerSeconds);
           Sound.shuffle();
           break;
         }
 
         case 'option_selected': {
-          // BÊN KIA ĐÃ CHỌN ĐÁP ÁN -> ĐỒNG BỘ CHỌN THEO NGAY LẬP TỨC
+          // Co-op mode: Một người chọn cả phòng chọn theo
           const letters = ['A', 'B', 'C', 'D'];
           State.userAnswers[msg.qIndex] = {
             selectedIndex: msg.optIndex,
             isCorrect: msg.isCorrect,
             selectedBy: msg.userName
           };
+          State.members = msg.members || State.members;
+          this.renderMembers();
 
           this.showSyncBanner(`⚡ ${msg.userName} đã chọn đáp án ${letters[msg.optIndex]} (${msg.isCorrect ? 'ĐÚNG' : 'CHƯA ĐÚNG'})`);
 
@@ -404,11 +1060,31 @@
           break;
         }
 
+        case 'versus_answer_recorded': {
+          // Versus mode: Cập nhật trạng thái người đã trả lời & điểm số
+          State.members = msg.members || State.members;
+          this.renderMembers();
+
+          if (msg.userId !== State.currentUser?.id) {
+            this.showSyncBanner(`⚡ ${msg.userName} đã nộp câu trả lời!`);
+          }
+
+          if (msg.allAnswered) {
+            QuestionTimer.stop();
+            Leaderboard.show(msg.playerAnswers);
+            Sound.streak();
+          }
+          break;
+        }
+
         case 'question_navigated': {
           State.currentIndex = msg.qIndex;
+          State.members = msg.members || State.members;
+          this.renderMembers();
           this.showSyncBanner(`👉 ${msg.userName} đã chuyển sang câu ${msg.qIndex + 1}`);
           App.renderCurrentQuestion();
           App.updateDrawerGrid();
+          QuestionTimer.start(State.liveTimerSeconds);
           break;
         }
 
@@ -416,26 +1092,42 @@
           State.questions = msg.questions;
           State.currentIndex = 0;
           State.userAnswers = {};
+          State.members = msg.members || State.members;
+          this.renderMembers();
           this.showSyncBanner(`🔀 ${msg.userName} đã xáo trộn câu hỏi và đáp án!`);
           Sound.shuffle();
           App.renderCurrentQuestion();
           App.updateDrawerGrid();
+          QuestionTimer.start(State.liveTimerSeconds);
           break;
         }
 
         case 'chat_broadcast': {
           this.appendMessage(msg.message);
-          const drawer = document.getElementById('chatDrawer');
-          if (!drawer.classList.contains('open')) {
-            this.unreadCount++;
-            this.updateUnreadBadges();
-            Sound.playTone(800, 'sine', 0.1, 0, 0.08);
+          if (!FloatingChat.isOpen || FloatingChat.isMinimized) {
+            FloatingChat.unreadCount++;
+            FloatingChat.updateBadges();
+            FloatingChat.showPreview(msg.message);
+            if (msg.message.userId !== State.currentUser?.id) {
+              Sound.playTone(800, 'sine', 0.1, 0, 0.08);
+            }
           }
           break;
         }
 
         case 'reaction_broadcast': {
           this.showFloatingReaction(msg.emoji, msg.userName);
+          break;
+        }
+
+        case 'voice_signal': {
+          VoiceChat.handleSignal(msg.senderUserId, msg.signal);
+          break;
+        }
+
+        case 'voice_mute_changed': {
+          State.members = msg.members || State.members;
+          this.renderMembers();
           break;
         }
 
@@ -461,6 +1153,8 @@
     updateRoomBar() {
       const bar = document.getElementById('liveRoomBar');
       const floatBtn = document.getElementById('floatingChatBtn');
+      const modeBadge = document.getElementById('liveModeBadge');
+      const lbBtn = document.getElementById('showLeaderboardBtn');
       if (!bar) return;
 
       if (State.liveMode) {
@@ -470,9 +1164,21 @@
         document.getElementById('liveMembersCount').textContent = `(${State.members.length}/10 bạn)`;
         const cCount = document.getElementById('chatMembersCount');
         if (cCount) cCount.textContent = State.members.length;
+
+        if (modeBadge) {
+          const isVersus = State.liveModeType === 'versus';
+          modeBadge.textContent = isVersus ? 'Versus (Đấu điểm)' : 'Co-op (Học chung)';
+          modeBadge.className = 'live-mode-badge ' + (isVersus ? 'versus' : '');
+        }
+
+        if (lbBtn) {
+          if (State.liveModeType === 'versus') lbBtn.classList.remove('hidden');
+          else lbBtn.classList.add('hidden');
+        }
       } else {
         bar.classList.add('hidden');
         if (floatBtn) floatBtn.classList.add('hidden');
+        if (lbBtn) lbBtn.classList.add('hidden');
       }
     },
 
@@ -486,14 +1192,40 @@
       State.members.forEach((m, idx) => {
         const isMe = State.currentUser && m.id === State.currentUser.id;
         const isOffline = m.status === 'offline';
+        const isAway = m.activity === 'away';
+        const isAnswered = m.answerStatus === 'answered';
         const color = colors[idx % colors.length];
         const initial = (m.name || '?').charAt(0).toUpperCase();
+
+        let statusDotClass = 'thinking';
+        let statusTitle = 'Đang suy nghĩ';
+        if (isOffline) {
+          statusDotClass = 'offline';
+          statusTitle = 'Mất kết nối (giữ chỗ 90s)';
+        } else if (isAway) {
+          statusDotClass = 'away';
+          statusTitle = 'Đang chuyển tab';
+        } else if (isAnswered) {
+          statusDotClass = 'answered';
+          statusTitle = 'Đã chọn đáp án';
+        }
 
         const avt = document.createElement('div');
         avt.className = 'member-avatar' + (isMe ? ' me' : '') + (isOffline ? ' offline' : '');
         avt.style.backgroundColor = color;
-        avt.title = `${m.name}${isMe ? ' (Bạn)' : ''}${isOffline ? ' [Tạm vắng - giữ chỗ 90s]' : ''}`;
-        avt.innerHTML = `<span>${initial}</span><span class="online-dot ${isOffline ? 'offline' : ''}"></span>`;
+        avt.title = `${m.name}${isMe ? ' (Bạn)' : ''} — ${statusTitle}${m.isHost ? ' [Host]' : ''}`;
+
+        const crownHtml = m.isHost ? '<span class="host-crown" title="Host phòng">👑</span>' : '';
+        const voiceHtml = m.voiceActive ? `<span class="voice-badge ${m.voiceMuted ? 'muted' : ''}" title="${m.voiceMuted ? 'Mic đang tắt' : 'Đang bật mic'}">${m.voiceMuted ? '🔇' : '🎙️'}</span>` : '';
+        const streakHtml = (State.liveModeType === 'versus' && m.streak >= 2) ? `<span class="streak-pill">🔥${m.streak}</span>` : '';
+
+        avt.innerHTML = `
+          ${crownHtml}
+          ${voiceHtml}
+          <span>${initial}</span>
+          <span class="status-dot ${statusDotClass}"></span>
+          ${streakHtml}
+        `;
         container.appendChild(avt);
       });
     },
@@ -573,42 +1305,16 @@
       setTimeout(() => item.remove(), 2500);
     },
 
-    updateUnreadBadges() {
-      const b1 = document.getElementById('unreadChatBadge');
-      const b2 = document.getElementById('floatingUnreadBadge');
-      [b1, b2].forEach(b => {
-        if (!b) return;
-        if (this.unreadCount > 0) {
-          b.textContent = this.unreadCount;
-          b.classList.remove('hidden');
-        } else {
-          b.classList.add('hidden');
-        }
-      });
-    },
-
-    toggleChat(open) {
-      const drawer = document.getElementById('chatDrawer');
-      const scrim = document.getElementById('scrim');
-      if (open === undefined) open = !drawer.classList.contains('open');
-
-      drawer.classList.toggle('open', open);
-      scrim.classList.toggle('show', open);
-
-      if (open) {
-        this.unreadCount = 0;
-        this.updateUnreadBadges();
-        const inp = document.getElementById('chatInput');
-        if (inp) setTimeout(() => inp.focus(), 150);
-      }
-    },
-
     exitLiveMode() {
       this.manualLeave = true;
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
       }
+      VoiceChat.leaveVoice();
+      QuestionTimer.hide();
+      FloatingChat.closeWindow();
+
       if (this.ws) {
         this.send({ type: 'leave_room' });
         try { this.ws.close(); } catch (e) {}
@@ -617,7 +1323,6 @@
       State.liveMode = false;
       State.roomId = null;
       this.updateRoomBar();
-      this.toggleChat(false);
       showToast('Đã rời khỏi phòng học Live.');
     }
   };
@@ -626,6 +1331,10 @@
   const App = {
     init() {
       this.applyTheme(State.theme);
+      Sound.updateIcons();
+      Sidebar.init();
+      Sidebar.renderSubjectList();
+      FloatingChat.init();
       this.renderHome();
       this.bindEvents();
       this.checkResumeState();
@@ -663,6 +1372,7 @@
 
     // --- Home View & Chapter selection ---
     renderHome() {
+      Sidebar.renderSubjectList();
       const subjectGrid = document.getElementById('subjectGrid');
       const courses = window.COURSES_DATA || window.SUBJECTS_DATA || [];
       const current = this.getCurrentCourse();
@@ -828,7 +1538,9 @@
           subjectTitle: current.title,
           chapterId: State.activeChapterId,
           chapterTitle: title,
-          questions: prepared
+          questions: prepared,
+          mode: State.liveModeType || 'coop',
+          timerSeconds: State.liveTimerSeconds || 30
         });
       }
 
@@ -837,6 +1549,7 @@
       this.switchView('quiz');
       this.renderCurrentQuestion();
       this.updateDrawerGrid();
+      QuestionTimer.start(State.liveTimerSeconds || 30);
     },
 
     // --- Shuffle Quiz on the Fly (Nút xáo trộn trong màn hình Quiz) ---
@@ -869,6 +1582,7 @@
       this.saveSession();
       this.renderCurrentQuestion();
       this.updateDrawerGrid();
+      QuestionTimer.start(State.liveTimerSeconds || 30);
     },
 
     // --- Render Question Card ---
@@ -980,12 +1694,56 @@
       this.updateDrawerGrid();
     },
 
-    handleOptionClick(optIndex) {
+    handleOptionClick(optIndex, isTimeout = false) {
       if (State.userAnswers[State.currentIndex]) return; // already answered
 
       const q = State.questions[State.currentIndex];
-      const isCorrect = optIndex === q.correctOptionIdx;
+      const isCorrect = (optIndex >= 0 && optIndex === q.correctOptionIdx);
 
+      // Nếu đang ở phòng Live chế độ Đấu Điểm (Versus Mode)
+      if (State.liveMode && State.liveModeType === 'versus') {
+        let points = 0;
+        if (isCorrect) {
+          const t = Math.max(0, QuestionTimer.timeLeft || 0);
+          const tot = QuestionTimer.totalSeconds || 30;
+          if (t >= tot - 3) {
+            points = 1000;
+          } else {
+            const ratio = t / Math.max(1, tot - 3);
+            points = Math.max(200, Math.round(200 + 800 * ratio));
+          }
+          const myMember = State.members.find(m => m.id === State.currentUser?.id);
+          const currentStreak = ((myMember?.streak || 0) + 1);
+          const streakBonus = Math.min(250, (currentStreak - 1) * 50);
+          points += streakBonus;
+          Sound.correct();
+          showToast(`+${points} điểm! ${currentStreak >= 2 ? '🔥 Chuỗi ' + currentStreak : ''}`);
+        } else {
+          Sound.wrong();
+          showToast(isTimeout ? '⏰ Hết thời gian làm bài!' : '❌ Chưa chính xác!');
+        }
+
+        State.userAnswers[State.currentIndex] = {
+          selectedIndex: optIndex,
+          isCorrect: isCorrect,
+          selectedBy: 'Bạn'
+        };
+
+        LiveRoom.send({
+          type: 'versus_submit_answer',
+          qIndex: State.currentIndex,
+          optIndex: optIndex,
+          isCorrect: isCorrect,
+          timeLeft: QuestionTimer.timeLeft,
+          totalTime: QuestionTimer.totalSeconds
+        });
+
+        this.saveSession();
+        this.renderCurrentQuestion();
+        return;
+      }
+
+      // Co-op mode hoặc tự luyện tập cá nhân
       State.userAnswers[State.currentIndex] = {
         selectedIndex: optIndex,
         isCorrect: isCorrect,
@@ -998,7 +1756,7 @@
         Sound.wrong();
       }
 
-      // ĐỒNG BỘ SANG CÁC BẠN KHÁC TRONG PHÒNG
+      // ĐỒNG BỘ SANG CÁC BẠN KHÁC TRONG PHÒNG (Co-op: một người chọn cả phòng chọn theo)
       if (State.liveMode) {
         LiveRoom.send({
           type: 'sync_select_option',
@@ -1085,6 +1843,7 @@
           }
           this.renderCurrentQuestion();
           this.toggleDrawer(false);
+          QuestionTimer.start(State.liveTimerSeconds || 30);
         });
         grid.appendChild(btn);
       });
@@ -1109,8 +1868,10 @@
             qIndex: State.currentIndex
           });
         }
+        QuestionTimer.start(State.liveTimerSeconds || 30);
         this.renderCurrentQuestion();
       } else {
+        QuestionTimer.hide();
         this.finishQuiz();
       }
     },
@@ -1124,6 +1885,7 @@
             qIndex: State.currentIndex
           });
         }
+        QuestionTimer.start(State.liveTimerSeconds || 30);
         this.renderCurrentQuestion();
       }
     },
@@ -1554,27 +2316,49 @@
         }
       });
 
-      document.getElementById('openChatBtn').addEventListener('click', () => LiveRoom.toggleChat(true));
-      document.getElementById('floatingChatBtn').addEventListener('click', () => LiveRoom.toggleChat(true));
-      document.getElementById('closeChatBtn').addEventListener('click', () => LiveRoom.toggleChat(false));
+      // Lựa chọn chế độ thi đấu (Co-op vs Versus)
+      const modeSelector = document.getElementById('liveModeSelector');
+      if (modeSelector) {
+        modeSelector.addEventListener('click', (e) => {
+          const btn = e.target.closest('button[data-mode]');
+          if (!btn) return;
+          modeSelector.querySelectorAll('button').forEach(b => b.classList.remove('on'));
+          btn.classList.add('on');
+          State.liveModeType = btn.dataset.mode;
+          showToast(`Chế độ Live: ${State.liveModeType === 'versus' ? 'Versus (Đấu điểm tốc độ)' : 'Co-op (Học chung)'}`);
+        });
+      }
 
-      document.getElementById('chatForm').addEventListener('submit', (e) => {
-        e.preventDefault();
-        const inp = document.getElementById('chatInput');
-        const text = inp.value.trim();
-        if (text) {
-          LiveRoom.sendChatMessage(text);
-          inp.value = '';
-        }
-      });
+      // Lựa chọn thời gian mỗi câu (15s, 30s, 45s)
+      const timerSelector = document.getElementById('liveTimerSelector');
+      if (timerSelector) {
+        timerSelector.addEventListener('click', (e) => {
+          const btn = e.target.closest('button[data-timer]');
+          if (!btn) return;
+          timerSelector.querySelectorAll('button').forEach(b => b.classList.remove('on'));
+          btn.classList.add('on');
+          State.liveTimerSeconds = parseInt(btn.dataset.timer, 10) || 30;
+          showToast(`Thời gian làm bài: ${State.liveTimerSeconds}s / câu`);
+        });
+      }
 
-      // Reactions click delegation
-      document.querySelector('.chat-reactions').addEventListener('click', (e) => {
-        const btn = e.target.closest('.reaction-btn');
-        if (btn && btn.dataset.e) {
-          LiveRoom.sendReaction(btn.dataset.e);
-        }
-      });
+      // Nút Micro WebRTC để đàm thoại
+      const voiceMicBtn = document.getElementById('voiceMicBtn');
+      if (voiceMicBtn) {
+        voiceMicBtn.addEventListener('click', () => VoiceChat.toggleMic());
+      }
+
+      // Nút Xem bảng xếp hạng trực tiếp
+      const showLbBtn = document.getElementById('showLeaderboardBtn');
+      if (showLbBtn) {
+        showLbBtn.addEventListener('click', () => Leaderboard.show());
+      }
+
+      // Nút Bật/Tắt âm thanh
+      const topSoundBtn = document.getElementById('soundToggleBtn');
+      if (topSoundBtn) topSoundBtn.addEventListener('click', () => Sound.toggleMute());
+      const qSoundBtn = document.getElementById('quizSoundBtn');
+      if (qSoundBtn) qSoundBtn.addEventListener('click', () => Sound.toggleMute());
 
       // Keyboard navigation
       window.addEventListener('keydown', (e) => {
@@ -1596,7 +2380,10 @@
             this.useHint();
           } else if (e.key === 'Escape') {
             this.toggleDrawer(false);
-            LiveRoom.toggleChat(false);
+            FloatingChat.closeWindow();
+            Sidebar.toggle(false);
+            const lbModal = document.getElementById('liveLeaderboardModal');
+            if (lbModal) lbModal.classList.add('hidden');
           }
         }
       });

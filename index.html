@@ -14,19 +14,101 @@
 <body>
   <!-- ========== HEADER ========== -->
   <header class="topbar">
-    <button class="brand" id="homeBtn" title="Về trang chủ">
-      <span class="brand-logo"><span class="material-symbols-rounded">school</span></span>
-      <span class="brand-text">
-        <strong id="topbarBrandTitle">Quiz NotebookLM</strong>
-        <small id="topbarBrandSub">Đa môn học · Ôn thi & Live Co-op</small>
-      </span>
-    </button>
+    <div class="topbar-left">
+      <button class="icon-btn" id="sidebarToggleBtn" title="Mở danh mục môn học & Live">
+        <span class="material-symbols-rounded">menu</span>
+      </button>
+      <button class="brand" id="homeBtn" title="Về trang chủ">
+        <span class="brand-logo"><span class="material-symbols-rounded">school</span></span>
+        <span class="brand-text">
+          <strong id="topbarBrandTitle">Quiz NotebookLM</strong>
+          <small id="topbarBrandSub">Đa môn học · Ôn thi & Live Co-op</small>
+        </span>
+      </button>
+    </div>
     <div class="topbar-actions">
+      <button class="btn tonal sm hide-xs" id="navLiveQuickBtn" title="Vào phòng Live 10 người">
+        <span class="material-symbols-rounded">sensors</span> <span>Phòng Live</span>
+      </button>
+      <button class="icon-btn" id="soundToggleBtn" title="Bật/Tắt âm thanh">
+        <span class="material-symbols-rounded" id="soundIcon">volume_up</span>
+      </button>
       <button class="icon-btn" id="themeBtn" title="Đổi giao diện sáng/tối">
         <span class="material-symbols-rounded">dark_mode</span>
       </button>
     </div>
   </header>
+
+  <!-- ========== LEFT SIDEBAR (DANH MỤC TRÁI) ========== -->
+  <aside class="app-sidebar" id="appSidebar">
+    <div class="sidebar-head">
+      <div class="sidebar-brand">
+        <span class="material-symbols-rounded sidebar-brand-icon">school</span>
+        <div>
+          <strong>Danh mục & Menu</strong>
+          <small>Chọn môn & Chế độ thi</small>
+        </div>
+      </div>
+      <button class="icon-btn sm" id="closeSidebarBtn" title="Đóng danh mục">
+        <span class="material-symbols-rounded">close</span>
+      </button>
+    </div>
+
+    <div class="sidebar-content">
+      <!-- 1. Nút Phòng Live nổi bật -->
+      <div class="sidebar-section">
+        <button class="sidebar-live-btn" id="sidebarLiveBtn">
+          <div class="sidebar-live-icon">
+            <span class="live-pulse"></span>
+            <span class="material-symbols-rounded">sensors</span>
+          </div>
+          <div class="sidebar-live-text">
+            <strong>PHÒNG HỌC LIVE</strong>
+            <small>10 người · Co-op & Đấu điểm</small>
+          </div>
+          <span class="material-symbols-rounded arrow-icon">chevron_right</span>
+        </button>
+      </div>
+
+      <!-- 2. Danh mục môn học -->
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">
+          <span class="material-symbols-rounded">category</span>
+          <span>Danh mục môn học</span>
+        </div>
+        <div class="sidebar-menu" id="sidebarSubjectList">
+          <!-- Render danh sách môn tự động từ data.js -->
+        </div>
+        <button class="sidebar-action-btn" id="sidebarAddSubjectBtn">
+          <span class="material-symbols-rounded">add_circle</span>
+          <span>+ Thêm môn học mới</span>
+        </button>
+      </div>
+
+      <!-- 3. Tiện ích & Tùy chọn -->
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">
+          <span class="material-symbols-rounded">tune</span>
+          <span>Tiện ích</span>
+        </div>
+        <div class="sidebar-menu">
+          <button class="sidebar-menu-item" id="sidebarSoundBtn">
+            <span class="material-symbols-rounded" id="sidebarSoundIcon">volume_up</span>
+            <span id="sidebarSoundText">Âm thanh: Đang bật</span>
+          </button>
+          <button class="sidebar-menu-item" id="sidebarThemeBtn">
+            <span class="material-symbols-rounded" id="sidebarThemeIcon">dark_mode</span>
+            <span>Giao diện: Sáng / Tối</span>
+          </button>
+          <button class="sidebar-menu-item" id="sidebarHelpBtn">
+            <span class="material-symbols-rounded">help</span>
+            <span>Hướng dẫn thêm môn</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </aside>
+  <div class="sidebar-scrim" id="sidebarScrim"></div>
 
   <main>
     <!-- ========== HOME ========== -->
@@ -59,17 +141,17 @@
           <p id="subjectHeroDesc">Chọn chương bạn muốn luyện tập hoặc tham gia <b>Phòng học chung Live 10 người</b> để làm bài và trò chuyện cùng bạn bè.</p>
         </div>
 
-        <!-- Live Co-op Room Card -->
-        <div class="live-card">
+        <!-- Live Co-op / Versus Room Card -->
+        <div class="live-card" id="liveCard">
           <div class="live-card-top">
             <div class="live-badge">
               <span class="live-pulse"></span>
               <span class="material-symbols-rounded">groups</span>
               <span>PHÒNG HỌC LIVE 10 NGƯỜI</span>
             </div>
-            <span class="live-hint-text">Đồng bộ 0-latency · Giữ chỗ 90s khi out</span>
+            <span class="live-hint-text">Đồng bộ 0-latency · Micro đàm thoại · Giữ chỗ 90s</span>
           </div>
-          <p class="live-desc">Cùng nhau làm bài trực tiếp tối đa 10 bạn. Một người chọn đáp án, các máy khác sẽ chọn theo ngay; nếu chuyển tab hoặc khóa màn hình, hệ thống sẽ <b>giữ chỗ 90s</b> và tự động kết nối lại khi bạn quay lại!</p>
+          <p class="live-desc">Cùng nhau học trực tiếp tối đa 10 bạn: <b>Hỗ trợ Mic nói chuyện trực tiếp</b>, khung chat nổi tiện lợi, và 2 chế độ thi: <b>Co-op (học chung)</b> hoặc <b>Versus (đấu điểm tốc độ)</b>!</p>
           <div class="live-form">
             <div class="live-field">
               <label for="userNameInput">Tên của bạn:</label>
@@ -79,12 +161,38 @@
               <label for="roomIdInput">Mã phòng (tối đa 10 bạn):</label>
               <input type="text" id="roomIdInput" value="SHDC" maxlength="10" placeholder="Mã phòng..." />
             </div>
-            <button class="btn primary" id="joinRoomBtn">
-              <span class="material-symbols-rounded">sensors</span> Vào phòng Live ngay
-            </button>
-            <button class="btn ghost" id="shareRoomBtn" title="Sao chép link web online gửi bạn bè">
-              <span class="material-symbols-rounded">share</span> Chia sẻ link
-            </button>
+
+            <!-- Lựa chọn chế độ thi đấu -->
+            <div class="live-field full-width">
+              <label>Chế độ thi đấu:</label>
+              <div class="segmented mode-segmented" id="liveModeSelector">
+                <button type="button" data-mode="coop" class="on" title="Một người chọn, cả phòng chọn theo">
+                  <span class="material-symbols-rounded">groups</span> Co-op (Học chung)
+                </button>
+                <button type="button" data-mode="versus" title="Mỗi người tự chọn, tính điểm theo tốc độ và chuỗi đúng">
+                  <span class="material-symbols-rounded">swords</span> Versus (Đấu điểm)
+                </button>
+              </div>
+            </div>
+
+            <!-- Thời gian làm bài mỗi câu -->
+            <div class="live-field full-width">
+              <label>Thời gian mỗi câu:</label>
+              <div class="segmented" id="liveTimerSelector">
+                <button type="button" data-timer="15">15 giây</button>
+                <button type="button" data-timer="30" class="on">30 giây</button>
+                <button type="button" data-timer="45">45 giây</button>
+              </div>
+            </div>
+
+            <div class="live-actions-row">
+              <button class="btn primary" id="joinRoomBtn">
+                <span class="material-symbols-rounded">sensors</span> Vào phòng Live ngay
+              </button>
+              <button class="btn ghost" id="shareRoomBtn" title="Sao chép link web online gửi bạn bè">
+                <span class="material-symbols-rounded">share</span> Chia sẻ link
+              </button>
+            </div>
           </div>
         </div>
 
@@ -145,14 +253,31 @@
           <div class="live-room-info">
             <span class="live-pulse"></span>
             <span class="live-room-code" id="liveRoomCode">PHÒNG: SHDC</span>
+            <span class="live-mode-badge" id="liveModeBadge">Co-op</span>
             <span class="live-members-count" id="liveMembersCount">(1/10 bạn)</span>
           </div>
+
+          <!-- Danh sách thành viên Realtime với trạng thái đang suy nghĩ, đã chọn, đổi tab, rớt mạng -->
           <div class="live-members-list" id="liveMembersList"></div>
+
           <div class="live-room-actions">
-            <button class="btn ghost sm" id="openChatBtn" title="Mở hộp chat">
+            <!-- Nút Micro WebRTC để nói chuyện trực tiếp với bạn bè -->
+            <button class="btn outline sm voice-btn" id="voiceMicBtn" title="Bật/Tắt Micro để nói chuyện với bạn bè">
+              <span class="material-symbols-rounded" id="voiceMicIcon">mic_off</span>
+              <span id="voiceMicLabel">Bật Mic</span>
+            </button>
+
+            <!-- Nút xem Bảng xếp hạng trong Versus mode -->
+            <button class="btn ghost sm hidden" id="showLeaderboardBtn" title="Xem bảng xếp hạng trực tiếp">
+              <span class="material-symbols-rounded">leaderboard</span>
+            </button>
+
+            <!-- Nút Chat nổi -->
+            <button class="btn ghost sm" id="openChatBtn" title="Mở hộp chat nổi">
               <span class="material-symbols-rounded">chat</span>
               <span id="unreadChatBadge" class="unread-badge hidden">0</span>
             </button>
+
             <button class="btn outline sm" id="leaveRoomBtn" title="Thoát phòng">
               <span class="material-symbols-rounded">logout</span> Rời phòng
             </button>
@@ -160,6 +285,20 @@
         </div>
 
         <div class="live-sync-banner hidden" id="liveSyncBanner"></div>
+
+        <!-- Question Countdown Timer (30s / câu) -->
+        <div class="question-timer-wrap hidden" id="questionTimerWrap">
+          <div class="question-timer-info">
+            <div class="timer-tag">
+              <span class="material-symbols-rounded" id="timerIcon">timer</span>
+              <span>Thời gian còn lại:</span>
+            </div>
+            <b class="timer-countdown" id="timerCountdown">30s</b>
+          </div>
+          <div class="question-timer-track">
+            <div class="question-timer-bar" id="questionTimerBar"></div>
+          </div>
+        </div>
 
         <div class="quiz-head">
           <div class="quiz-title">
@@ -169,6 +308,9 @@
           <div class="quiz-tools">
             <span class="score-pill good" title="Số câu đúng"><span class="material-symbols-rounded">check</span><b id="scoreGood">0</b></span>
             <span class="score-pill bad" title="Số câu sai"><span class="material-symbols-rounded">close</span><b id="scoreBad">0</b></span>
+            <button class="icon-btn" id="quizSoundBtn" title="Bật/Tắt âm thanh câu hỏi">
+              <span class="material-symbols-rounded" id="quizSoundIcon">volume_up</span>
+            </button>
             <button class="btn tonal sm" id="shuffleBtn" title="Xáo trộn lại câu hỏi và đáp án">
               <span class="material-symbols-rounded">shuffle</span><span class="hide-sm">Xáo trộn</span>
             </button>
@@ -225,17 +367,36 @@
         <button class="btn primary full" id="finishBtn"><span class="material-symbols-rounded">flag</span> Nộp bài & xem kết quả</button>
       </aside>
 
-      <!-- Live Chat Drawer -->
-      <aside class="chat-drawer" id="chatDrawer">
-        <div class="chat-drawer-head">
-          <div class="chat-title">
-            <span class="material-symbols-rounded">forum</span>
-            <h3>Trò chuyện Live (<span id="chatMembersCount">1</span> bạn)</h3>
+      <!-- ========== KHUNG CHAT NỔI (FLOATING CHAT) ========== -->
+      <!-- 1. Toast thông báo nổi khi có tin nhắn mới (Tự hiện khi có tin nhắn) -->
+      <div class="chat-floating-preview hidden" id="chatFloatingPreview">
+        <div class="preview-avatar" id="chatPreviewAvatar">?</div>
+        <div class="preview-body">
+          <div class="preview-header">
+            <strong id="chatPreviewSender">Bạn học</strong>
+            <span class="preview-tag">Tin mới</span>
           </div>
-          <button class="icon-btn" id="closeChatBtn"><span class="material-symbols-rounded">close</span></button>
+          <div class="preview-text" id="chatPreviewText">...</div>
+        </div>
+        <button class="preview-close-btn" id="closeChatPreviewBtn" title="Đóng xem trước">
+          <span class="material-symbols-rounded">close</span>
+        </button>
+      </div>
+
+      <!-- 2. Cửa sổ chat nổi (Không che mất màn hình, có thể thu nhỏ/đóng) -->
+      <div class="floating-chat-window hidden" id="floatingChatWindow">
+        <div class="floating-chat-head">
+          <div class="floating-chat-title">
+            <span class="material-symbols-rounded">forum</span>
+            <span>Trò chuyện Live (<b id="chatMembersCount">1</b>)</span>
+          </div>
+          <div class="floating-chat-actions">
+            <button class="icon-btn sm" id="minimizeChatBtn" title="Thu nhỏ"><span class="material-symbols-rounded">remove</span></button>
+            <button class="icon-btn sm" id="closeFloatingChatBtn" title="Đóng chat"><span class="material-symbols-rounded">close</span></button>
+          </div>
         </div>
         <div class="chat-reactions">
-          <span>Thả cảm xúc:</span>
+          <span>Cảm xúc:</span>
           <button class="reaction-btn" data-e="❤️">❤️</button>
           <button class="reaction-btn" data-e="🔥">🔥</button>
           <button class="reaction-btn" data-e="👏">👏</button>
@@ -246,15 +407,15 @@
           <div class="chat-sys-msg">Chào mừng bạn vào phòng học chung! Hãy cùng thảo luận nhé.</div>
         </div>
         <form class="chat-input-bar" id="chatForm">
-          <input type="text" id="chatInput" placeholder="Nhập tin nhắn để nói chuyện..." maxlength="200" autocomplete="off" />
+          <input type="text" id="chatInput" placeholder="Nhập tin nhắn..." maxlength="200" autocomplete="off" />
           <button type="submit" class="btn primary sm" id="chatSendBtn">
             <span class="material-symbols-rounded">send</span>
           </button>
         </form>
-      </aside>
+      </div>
 
-      <!-- Floating Chat Open Button (when drawer is closed) -->
-      <button class="floating-chat-btn hidden" id="floatingChatBtn" title="Mở khung trò chuyện">
+      <!-- 3. Nút kích hoạt mở khung chat nổi góc dưới phải -->
+      <button class="floating-chat-btn hidden" id="floatingChatBtn" title="Mở trò chuyện nổi">
         <span class="material-symbols-rounded">chat</span>
         <span id="floatingUnreadBadge" class="unread-badge hidden">0</span>
       </button>
@@ -370,6 +531,27 @@
       </div>
       <div style="display:flex; justify-content:flex-end;">
         <button class="btn primary" id="gotItBtn">Đã hiểu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Bảng xếp hạng Trực tiếp (Versus Mode Leaderboard) -->
+  <div class="modal-overlay hidden" id="liveLeaderboardModal">
+    <div class="modal-content leaderboard-modal">
+      <div class="modal-header">
+        <h3><span class="material-symbols-rounded" style="color:var(--primary);">leaderboard</span> Bảng xếp hạng Trực tiếp</h3>
+        <button class="icon-btn sm" id="closeLeaderboardModal" title="Đóng"><span class="material-symbols-rounded">close</span></button>
+      </div>
+      <div class="leaderboard-meta">
+        <span id="leaderboardRoundText">Đua điểm tốc độ & chính xác</span>
+        <span class="countdown-badge" id="leaderboardTimerBadge">Câu tiếp theo: 5s</span>
+      </div>
+      <div class="leaderboard-list" id="leaderboardList">
+        <!-- Render danh sách xếp hạng realtime -->
+      </div>
+      <div class="modal-footer leaderboard-footer">
+        <button class="btn outline" id="leaderboardCloseBtn">Đóng bảng</button>
+        <button class="btn primary" id="leaderboardNextBtn">Câu tiếp theo <span class="material-symbols-rounded">arrow_forward</span></button>
       </div>
     </div>
   </div>
